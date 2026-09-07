@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="theme-color" content="#f4f5f1"><meta name="description" content="SingleTake — a local-first architectural modeling workbench powered by WebGPU.">
+<title>SingleTake · Spatial design, without friction.</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23253d33'/%3E%3Cpath d='M29 11H13L9 15L13 20H26L30 25L26 29H10' fill='none' stroke='%23c7ed9a' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="app">
+<header class="topbar">
+ <button class="brand" data-action="about" aria-label="About SingleTake"><span class="brand-mark"><svg viewBox="0 0 32 32"><path d="M24 8H11L7 12L11 16H21L25 20L21 24H8"/></svg></span><span>Single<span class="brand-light">Take</span><sup>LAB</sup></span></button>
+ <div class="project-heading"><span class="project-dot"></span><button id="project-name" data-action="rename-project">Untitled model</button><span class="project-format" id="project-format">TAKE</span><span class="chevron">⌄</span><span class="divider"></span><span id="save-status">Local workspace</span></div>
+ <div class="top-actions"><button class="icon-button" data-action="undo" title="Undo · Ctrl Z" aria-label="Undo" id="undo-button"></button><button class="icon-button" data-action="redo" title="Redo · Ctrl Shift Z" aria-label="Redo" id="redo-button"></button><span class="divider"></span><button class="text-button" data-action="shortcuts">Help <kbd>?</kbd></button><button class="button secondary" data-action="open" id="open-button"></button><button class="button primary" data-action="save" id="save-button"></button><button class="avatar" data-action="settings" title="Workspace settings">ST</button></div>
+</header>
+<nav class="commandbar" aria-label="Workspace commands">
+ <div class="workspace-tabs"><button class="workspace-tab active" data-action="workspace-model">Model</button><button class="workspace-tab" data-action="workspace-inspect">Inspect</button></div>
+ <span class="divider"></span>
+ <button class="text-button" data-action="new" id="new-button"></button><button class="text-button" data-action="export" id="export-button"></button><button class="text-button" data-action="command" id="command-button"></button>
+ <div class="spacer"></div><span class="engine-indicator"><span></span><b id="engine-label">WebGPU</b><small>LOCAL RENDERING</small></span><span class="divider"></span><button class="text-button" data-action="settings" id="units-button">Meters ⌄</button>
+</nav>
+<main class="workspace">
+ <aside class="tool-rail" aria-label="Modeling tools"><div id="tools-main"></div><div class="rail-divider"></div><div id="tools-edit"></div><div class="rail-divider"></div><div id="tools-view"></div><div class="spacer"></div><button class="tool-button" data-action="command" title="Command palette · Ctrl K" id="rail-command"></button></aside>
+ <section class="viewport" id="viewport" aria-label="Interactive 3D modeling viewport">
+  <canvas id="canvas" tabindex="0" aria-label="WebGPU 3D canvas. Middle-drag to orbit, shift-middle-drag to pan, wheel to zoom."></canvas>
+  <svg id="overlay" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g id="dimension-layer"></g><g id="preview-layer"></g><g id="selection-layer"></g><g id="snap-layer"></g></svg>
+  <div class="viewport-heading"><div class="breadcrumb"><span id="breadcrumb-name">Untitled model</span><span>/</span><strong id="workspace-label">Model space</strong></div><div class="viewport-badges"><span class="soft-badge" id="source-badge">LOCAL PROJECT</span><span class="quiet" id="object-count"></span></div></div>
+  <div class="view-controls"><div class="view-cube" aria-label="Camera preset"><button data-view="top" class="cube-top" title="Top view">TOP</button><button data-view="front" class="cube-front" title="Front view">FRONT</button><button data-view="right" class="cube-right" title="Right view">RIGHT</button></div><div class="axis-widget"><span class="axis-y">Y</span><span class="axis-z">Z</span><span class="axis-x">X</span></div><button class="round-control" data-action="view-iso" id="view-iso" title="Perspective isometric view"></button><button class="round-control" data-action="fit" id="fit-button" title="Zoom extents · Shift Z"></button></div>
+  <div class="style-toolbar"><button data-style="0" class="active" title="Materials and shadows">Studio</button><button data-style="1" title="Monochrome surfaces">Clay</button><button data-style="2" title="All wire edges">Wireframe</button><button data-style="3" title="Transparent X-ray">X-ray</button><span></span><button id="projection-toggle" data-action="projection" title="Toggle projection">Perspective</button></div>
+  <div id="selection-hint" class="selection-hint"><span class="hint-icon">↖</span><span>Make space for your next idea.</span><small>Click to select · Middle-drag to orbit</small></div>
+  <div id="measurement-box" class="measurement-box"><label for="measurement-input" id="measurement-label">Measurements</label><input id="measurement-input" aria-label="Measurements, dimensions or distance" placeholder="Type a precise value" autocomplete="off"><kbd>↵</kbd></div>
+  <div id="toast-stack" role="status" aria-live="polite"></div>
+  <div id="loading" class="loading-overlay"><div class="loading-card"><div class="loading-logo"><span class="brand-mark"><svg viewBox="0 0 32 32"><path d="M24 8H11L7 12L11 16H21L25 20L21 24H8"/></svg></span></div><span class="eyebrow">YOUR IDEAS. YOUR DEVICE.</span><h1>Space to make.</h1><p id="loading-message">Starting the WebGPU engine…</p><div class="progress-track"><div id="loading-progress"></div></div><small>Local modeling. Your files stay on this device.</small><button id="cancel-load" class="text-button hidden">Cancel import</button></div></div>
+  <div id="drop-zone" class="drop-zone hidden"><div><span>＋</span><h2>Bring your model in.</h2><p>SKP · GLB · glTF · OBJ · STL · PLY · DXF · TAKE</p><small>Your files never leave this device.</small></div></div>
+ </section>
+ <aside class="inspector" aria-label="Model inspector">
+  <div class="inspector-tabs"><button class="active" data-tab="model">Model</button><button data-tab="materials">Materials</button><button data-tab="scenes">Scenes</button></div>
+  <div id="model-panel" class="panel active">
+   <section class="inspector-section scene-section"><div class="section-heading"><h2>OUTLINER</h2><div><button class="tiny-button" data-action="expand-all" title="Expand hierarchy">⊞</button><button class="tiny-button" data-action="collapse-all" title="Collapse hierarchy">⊟</button></div></div><div class="searchbox"><span>⌕</span><input id="outliner-search" placeholder="Find in model…" aria-label="Search model objects"><kbd>Ctrl F</kbd></div><div id="outliner" class="outliner" role="tree" aria-label="Model hierarchy"></div><div class="outliner-bottom"><span id="outliner-total"></span><button class="text-button tiny" data-action="group">＋ Group</button></div></section>
+   <section class="inspector-section"><div class="section-heading"><h2>ENTITY INFO</h2><span id="selection-count" class="count-badge">0</span></div><div id="entity-info"></div></section>
+   <section class="inspector-section"><div class="section-heading"><h2>TAGS</h2><button class="tiny-button" data-action="add-tag" title="Add tag">＋</button></div><div id="tags-list"></div></section>
+   <section class="inspector-section view-section"><div class="section-heading"><h2>VIEW SETTINGS</h2><button class="tiny-button" data-action="settings" title="View settings">↗</button></div><label class="toggle-row"><span>Shadows</span><input type="checkbox" id="shadows-toggle" checked><i></i></label><label class="toggle-row"><span>Profile edges</span><input type="checkbox" id="edges-toggle" checked><i></i></label><label class="toggle-row"><span>Ground grid</span><input type="checkbox" id="grid-toggle" checked><i></i></label><label class="toggle-row"><span>Section plane</span><input type="checkbox" id="section-toggle"><i></i></label><div id="section-options" class="hidden"><div class="input-row"><select id="section-axis" aria-label="Section axis"><option value="y">Y · Horizontal</option><option value="x">X · Vertical</option><option value="z">Z · Vertical</option></select><button class="small-button" data-action="flip-section">Flip</button></div><input type="range" id="section-slider" min="-5" max="20" step=".05"><div class="quiet" id="section-value"></div></div></section>
+  </div>
+  <div id="materials-panel" class="panel"><section class="inspector-section"><div class="section-heading"><h2>MATERIAL LIBRARY</h2><button class="tiny-button" data-action="add-material" title="New material">＋</button></div><p class="panel-intro">Choose a finish. Select a face or an object, then paint.</p><div id="material-grid" class="material-grid"></div></section><section class="inspector-section" id="material-editor"></section></div>
+  <div id="scenes-panel" class="panel"><section class="inspector-section"><div class="section-heading"><h2>SAVED VIEWS</h2><button class="tiny-button" data-action="save-scene" title="Save current camera">＋</button></div><p class="panel-intro">Capture the camera, tag visibility, and section position.</p><div id="scene-list"></div><button class="button secondary full-width" data-action="save-scene">＋ Save current view</button></section><section class="inspector-section"><h2>MODEL EXCHANGE</h2><p class="panel-intro">Work locally. Share in an open format.</p><button class="button secondary full-width" data-action="export">Export model ↗</button><button class="button secondary full-width" data-action="screenshot">Capture viewport ↗</button><button class="text-button" data-action="import-report">View import report</button></section></div>
+  <div class="inspector-footer"><span class="privacy-dot"></span><span>Private by design.</span><small>Nothing is uploaded.</small></div>
+ </aside>
+</main>
+<footer class="statusbar"><div class="status-left"><span class="status-tool" id="active-tool-label">Select</span><span class="status-instruction" id="status-instruction">Click an object to select. Shift-click to add.</span></div><div class="status-right"><button id="snap-toggle" class="status-toggle active" data-action="toggle-snap">● Snap</button><span class="divider"></span><span id="render-stats">Initializing…</span><span class="divider"></span><button class="status-toggle" data-action="diagnostics" title="Renderer diagnostics">↗</button></div></footer>
+</div>
+<input id="file-input" type="file" multiple hidden accept=".skp,.glb,.gltf,.obj,.mtl,.stl,.ply,.dxf,.take,.json,.bin,.png,.jpg,.jpeg,.webp">
+<input id="texture-input" type="file" hidden accept="image/png,image/jpeg,image/webp">
+<dialog id="dialog"><div id="dialog-content"></div></dialog>
+<div id="context-menu" class="context-menu hidden"></div>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

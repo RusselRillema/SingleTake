@@ -1,0 +1,21 @@
+{
+  "name": "singletake",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependency-free, local-first WebGPU architectural modeler",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node tools/check.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RusselRillema/SingleTake.git"
+  }
+}

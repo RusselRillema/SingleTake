@@ -1,0 +1,6 @@
+/** Local-only autosave. IndexedDB stores typed arrays directly rather than expanding texture bytes to JSON. */
+let database;
+export async function openStorage(){if(database)return database;database=await new Promise((resolve,reject)=>{const r=indexedDB.open('singletake-workspace',1);r.onupgradeneeded=()=>r.result.createObjectStore('workspace');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});return database;}
+export async function saveWorkspace(project,camera){const db=await openStorage();return new Promise((resolve,reject)=>{const t=db.transaction('workspace','readwrite');t.objectStore('workspace').put({project,camera,savedAt:Date.now()},'current');t.oncomplete=resolve;t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error||Error('Local save was aborted.'));});}
+export async function loadWorkspace(){const db=await openStorage();return new Promise((resolve,reject)=>{const r=db.transaction('workspace').objectStore('workspace').get('current');r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>reject(r.error);});}
+export async function clearWorkspace(){const db=await openStorage();return new Promise((resolve,reject)=>{const t=db.transaction('workspace','readwrite');t.objectStore('workspace').delete('current');t.oncomplete=resolve;t.onerror=()=>reject(t.error);});}

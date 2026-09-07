@@ -1,0 +1,13 @@
+node_modules/
+dist/
+site/
+*.skp
+*.glb
+*.take
+*.log
+.env*
+coverage/
+test-results/
+playwright-report/
+__pycache__/
+.DS_Store

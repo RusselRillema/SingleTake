@@ -1,0 +1,7 @@
+import * as M from '../core/math.js';
+/** CPU median-split BVH. Created once per mesh revision, reused by all component instances. */
+export class BVH{
+ constructor(mesh,triangles){this.mesh=mesh;this.triangles=triangles;this.root=this.build(triangles.map((_,i)=>i),0);}
+ build(ids,depth){const box=M.emptyBounds();for(const i of ids){const t=this.triangles[i];M.extendBounds(box,this.mesh.vertices[t.a]);M.extendBounds(box,this.mesh.vertices[t.b]);M.extendBounds(box,this.mesh.vertices[t.c]);}if(ids.length<=12||depth>=32)return {box,ids};const size=M.extent(box),axis=size.indexOf(Math.max(...size));ids.sort((a,b)=>{const ta=this.triangles[a],tb=this.triangles[b],v=this.mesh.vertices;return (v[ta.a][axis]+v[ta.b][axis]+v[ta.c][axis])-(v[tb.a][axis]+v[tb.b][axis]+v[tb.c][axis]);});const mid=ids.length>>1;return {box,left:this.build(ids.slice(0,mid),depth+1),right:this.build(ids.slice(mid),depth+1)};}
+ intersect(ray,predicate=null){let best=null;const visit=n=>{const box=M.rayBox(ray,n.box);if(box===null||(best&&box>best.t))return;if(n.ids){for(const i of n.ids){const t=this.triangles[i],v=this.mesh.vertices,h=M.rayTriangle(ray,v[t.a],v[t.b],v[t.c]);if(h&&(!best||h.t<best.t)&&(!predicate||predicate({...h,face:t.face,triangle:t})))best={...h,face:t.face,triangle:t};}}else{const l=M.rayBox(ray,n.left.box),r=M.rayBox(ray,n.right.box);if(l!==null&&r!==null){if(l<r){visit(n.left);visit(n.right);}else{visit(n.right);visit(n.left);}}else if(l!==null)visit(n.left);else if(r!==null)visit(n.right);}};visit(this.root);return best;}
+}
