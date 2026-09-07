@@ -26,18 +26,23 @@ Read modern VFF-based `.skp`, uncompressed GLB/glTF, OBJ/MTL, STL, PLY, supporte
 
 **Native SKP writing, legacy SKP containers, IFC/DWG/STEP, complete dynamic components and an exact CAD topology kernel are not implemented.** Read the compatibility matrix before relying on an interchange workflow.
 
+## Deploy
+
+The repository includes a test-and-audit-gated GitHub Pages workflow. Run `npm run verify` before publishing; only the runtime files in `dist/` are deployed. See `docs/DEPLOYMENT.md` for bundle import, authenticated publication and the required initial Pages setting. The supplied commits are local while integration writes remain blocked; the presence of a workflow does not mean a site is live.
+
 ## Development
 
 ```sh
 npm test
 npm run check
 npm run audit
+npm run build
 ```
 
 CPU tests do not require a GPU. Four optional private-model regressions require `SINGLETAKE_MODEL_FIXTURE` to point outside the repository. Optional browser tests separately distinguish DOM/controller behavior from real WebGPU execution. No private model fixture, external manual, extracted texture or font is distributed.
 
 This is a development build, not a claim of complete commercial CAD parity or a measured performance guarantee. Actual GPU acceptance remains necessary on target devices.
 
-[Controls](docs/CONTROLS.md) · [Architecture](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Testing](docs/TESTING.md) · [Naming audit](docs/NAMING-AUDIT.md)
+[Deployment](docs/DEPLOYMENT.md) · [Controls](docs/CONTROLS.md) · [Architecture](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Testing](docs/TESTING.md) · [Naming audit](docs/NAMING-AUDIT.md)
 
 MIT licensed. Independent research attribution is retained in `THIRD_PARTY_NOTICES.md`. Review model and texture redistribution rights before publishing assets.

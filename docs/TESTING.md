@@ -8,7 +8,7 @@ npm run check
 npm run audit
 ```
 
-The Node suite covers geometry, documents, exchange, normals, modifiers, connected/window selection, groups/components, tags, inference, camera anchors, planar chords, material-safe clipboard behavior and stale-operation protection.
+The Node suite covers geometry, documents, exchange, normals, modifiers, connected/window selection, groups/components, tags, inference, camera anchors, planar chords, material-safe clipboard behavior, stale-operation protection, naming policy checks and deterministic static packaging.
 
 Four private-model tests are skipped unless an external fixture is supplied:
 
@@ -40,6 +40,6 @@ The test navigates normally, initializes an adapter, creates a solid, exercises 
 
 ## Recorded development result
 
-The submitted private-model run passed all 71 CPU tests. The normal public run passed 67 and skipped its four private-fixture tests. All 17 DOM/controller checks passed with no page errors. Browser navigation returned `ERR_BLOCKED_BY_ADMINISTRATOR`; actual GPU execution and performance remain unverified. These are development results, not a substitute for target-device acceptance.
+The submitted private-model run passed all 77 CPU tests. The normal public run passed 73 and skipped its four private-fixture tests. All 17 DOM/controller checks passed with no page errors. Browser navigation returned `ERR_BLOCKED_BY_ADMINISTRATOR`; actual GPU execution and performance remain unverified. These are development results, not a substitute for target-device acceptance.
 
 See `VALIDATION.json` for machine-readable scope. The naming audit checks a defined fingerprint policy; adding third-party assets or libraries requires a fresh review.

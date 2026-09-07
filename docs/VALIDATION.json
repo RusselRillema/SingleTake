@@ -2,14 +2,14 @@
   "application": "SingleTake",
   "scope": "Local development checks; not remote deployment or real GPU validation",
   "cpuPublic": {
-    "total": 71,
-    "passed": 67,
+    "total": 77,
+    "passed": 73,
     "skippedPrivateFixture": 4,
     "failed": 0
   },
   "cpuWithPrivateFixture": {
-    "total": 71,
-    "passed": 71,
+    "total": 77,
+    "passed": 77,
     "failed": 0
   },
   "domController": {
@@ -27,5 +27,17 @@
   },
   "performance": {
     "status": "UNMEASURED"
+  },
+  "staticBuild": {
+    "status": "PASS",
+    "runtimeFiles": 33,
+    "relativeReferencesChecked": 72,
+    "namingMatches": 0
+  },
+  "namingAudit": {
+    "status": "PASS",
+    "policyRules": 26,
+    "matches": 0,
+    "scope": "Working source, built runtime, filenames, text encodings, and all reachable Git history"
   }
 }
