@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {fingerprint,findMatches,audit} from '../tools/audit.mjs';
+const rules=[fingerprint('LegacyMarkerExample',false,'demo')];
+test('Naming fingerprints match normalized separators and embedded identifiers',()=>{assert.deepEqual(findMatches('prefixLegacy_Marker-ExampleSuffix',rules),['demo']);assert.deepEqual(findMatches('legacy marker example',rules),['demo']);assert.deepEqual(findMatches('CurrentApplication',rules),[]);});
+test('Case-sensitive naming rules do not reject generic lowercase vocabulary',()=>{const r=[fingerprint('CapitalExample',true,'exact')];assert.deepEqual(findMatches('capitalexample',r),[]);assert.deepEqual(findMatches('CapitalExample',r),['exact']);});
+test('Rolling naming audit finds windows at both ends of a long input',()=>{const input='LegacyMarkerExample'+'safecontent'.repeat(2000)+'LegacyMarkerExample';assert.deepEqual(findMatches(input,rules),['demo']);});
+test('Audit reads UTF-16 source contents and reports no decoded prohibited text',async()=>{const dir=await mkdtemp(join(tmpdir(),'singletake-audit-'));try{await writeFile(join(dir,'README.md'),Buffer.from('LegacyMarkerExample','utf16le'));const result=await audit({root:dir,history:false,policy:{rules}});assert.equal(result.status,'FAIL');assert.equal(result.matches,1);assert(!JSON.stringify(result).includes('LegacyMarkerExample'));}finally{await rm(dir,{recursive:true,force:true});}});
+test('Audit catches historical content after working source has been cleaned',async()=>{const dir=await mkdtemp(join(tmpdir(),'singletake-history-'));const git=(...args)=>{const r=spawnSync('git',['-C',dir,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);};try{git('init','-b','main');git('config','user.name','Audit test');git('config','user.email','audit@example.test');await writeFile(join(dir,'README.md'),'LegacyMarkerExample');git('add','.');git('commit','-m','Initial test');await writeFile(join(dir,'README.md'),'Current title');git('add','.');git('commit','-m','Change test');const result=await audit({root:dir,history:true,policy:{rules}});assert.equal(result.commits,2);assert.equal(result.history,'ALL_REACHABLE_REFS');assert(result.issues.some(x=>x.object.startsWith('blob:')));assert.equal(result.status,'FAIL');}finally{await rm(dir,{recursive:true,force:true});}});
+test('Audit rejects unreviewed binary assets rather than silently skipping them',async()=>{const dir=await mkdtemp(join(tmpdir(),'singletake-asset-'));try{await writeFile(join(dir,'asset.bin'),new Uint8Array([1,2,3]));const result=await audit({root:dir,history:false,policy:{rules}});assert(result.issues.some(x=>x.rule==='unreviewed-file-type'));}finally{await rm(dir,{recursive:true,force:true});}});

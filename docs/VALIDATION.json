@@ -1,0 +1,31 @@
+{
+  "application": "SingleTake",
+  "scope": "Local development checks; not remote deployment or real GPU validation",
+  "cpuPublic": {
+    "total": 71,
+    "passed": 67,
+    "skippedPrivateFixture": 4,
+    "failed": 0
+  },
+  "cpuWithPrivateFixture": {
+    "total": 71,
+    "passed": 71,
+    "failed": 0
+  },
+  "domController": {
+    "passed": 17,
+    "pageErrors": 0,
+    "webgpuInitialized": false
+  },
+  "nativeGpu": {
+    "status": "NOT_RUN",
+    "reason": "Browser navigation is blocked by administrator policy"
+  },
+  "remotePublication": {
+    "status": "BLOCKED",
+    "reason": "Connected repository write requests returned HTTP 403"
+  },
+  "performance": {
+    "status": "UNMEASURED"
+  }
+}

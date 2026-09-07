@@ -97,20 +97,20 @@ export async function importSkp(buffer,name='VFF model model',progress=()=>{}){
   const meshId='skpm_'+key;
   project.meshes[meshId]={id:meshId,name:d.name,vertices,faces:outFaces,edges:[...d.edges.values()].filter(e=>index.has(e.a)&&index.has(e.b)).map(e=>({a:index.get(e.a),b:index.get(e.b),hidden:!!(e.flags&1),smooth:!!(e.flags&24)})),revision:0};d.meshId=meshId;
  }
- const root=definitions.get('ROOT'),rootGroup=makeNode(project.name,null,{id:'skp-root',tag:'0'});project.nodes.push(rootGroup);
- if(root.verts.size)project.nodes.push(makeNode('Model geometry',root.meshId,{parent:rootGroup.id}));
+ const root=definitions.get('ROOT');
+ if(root.verts.size)project.nodes.push(makeNode('Model geometry',root.meshId,{parent:null,kind:'raw',tag:'0'}));
  const visit=(d,parent,ancestors=new Set(),inheritedTag='0')=>{
   if(ancestors.size>96)throw Error('VFF model instance hierarchy is too deep.');
   for(const inst of d.instances){
    const def=definitions.get(inst.ref);if(!def){report.unresolvedInstances++;continue;}
    if(ancestors.has(inst.ref)){warnings.push('Recursive component '+def.name+' was not expanded.');continue;}
-   const tag=inst.tag&&inst.tag!==1?String(inst.tag):inheritedTag;
+   const tag=inst.tag&&inst.tag!==1?String(inst.tag):'0';
    const node=makeNode(inst.name||def.name,def.verts.size?def.meshId:null,{parent,matrix:inst.matrix,material:materialIds.get(inst.material)??null,tag,visible:!inst.hidden,component:String(inst.ref)});
    project.nodes.push(node);report.instances++;if(project.nodes.length>250000)throw Error('SKP instance expansion exceeds 250,000 nodes.');
    visit(def,node.id,new Set([...ancestors,inst.ref]),tag);
   }
  };
- visit(root,rootGroup.id);
+ visit(root,null);
  report.definitions=definitions.size-1;report.materials=project.materials.length-1;report.textures=project.materials.filter(m=>m.texture).length;report.layers=project.tags.length;report.parseMs=Math.round(performance.now()-started);
  if(report.invalidFaces)warnings.push(`${report.invalidFaces} invalid face loops were not imported.`);
  if(report.unresolvedInstances)warnings.push(`${report.unresolvedInstances} component references could not be resolved.`);

@@ -1,0 +1,33 @@
+import * as M from '../core/math.js';
+import {AXES} from '../core/coordinates.js';
+import {adjacency} from '../geometry/topology.js';
+import {tagVisible} from '../core/tags.js';
+const CELL=24;
+export function rayLineParameter(ray,anchor,direction){const v=M.norm(direction),d=ray.direction,w=M.sub(ray.origin,anchor),a=M.dot(d,d),b=M.dot(d,v),den=a-b*b;return Math.abs(den)<1e-10?null:(a*M.dot(v,w)-b*M.dot(d,w))/den;}
+export function normalDrag(camera,anchor,normal,from,to){const scale=Math.max(.001,camera.distance*.1),a=camera.project(anchor),b=camera.project(M.add(anchor,M.mul(normal,scale)));if(a&&b){const dx=b[0]-a[0],dy=b[1]-a[1],d2=dx*dx+dy*dy;if(d2>4)return ((to.x-from.x)*dx+(to.y-from.y)*dy)/d2*scale;}return (from.y-to.y)*camera.distance*Math.tan(camera.fov/2)*2/Math.max(1,camera.height);}
+export function facingNormal(hit,camera){return M.dot(hit.normal,M.sub(camera.eye,hit.point))<0?M.mul(hit.normal,-1):hit.normal.slice();}
+export function projectWith(matrix,p,width,height){const w=matrix[3]*p[0]+matrix[7]*p[1]+matrix[11]*p[2]+matrix[15];if(w<=0)return null;const q=M.transform(matrix,p);if(q[2]<0||q[2]>1)return null;return [(q[0]+1)*width/2,(1-q[1])*height/2,q[2],w];}
+export function nearestOnProjectedEdge(pos,a,b,pa,pb){const dx=pb[0]-pa[0],dy=pb[1]-pa[1],den=dx*dx+dy*dy,t=den?M.clamp(((pos.x-pa[0])*dx+(pos.y-pa[1])*dy)/den,0,1):0,wa=pa[3]||1,wb=pb[3]||1,u=(t/wb)/((1-t)/wa+t/wb);return {point:M.lerp(a,b,u),distance:Math.hypot(pos.x-pa[0]-dx*t,pos.y-pa[1]-dy*t),t:u};}
+function loopCenter(points){if(points.length<8)return null;const a=points[0],b=points[Math.floor(points.length/3)],c=points[Math.floor(points.length*2/3)],u=M.sub(b,a),v=M.sub(c,a),w=M.cross(u,v),w2=M.dot(w,w);if(w2<1e-16)return null;const center=M.add(a,M.mul(M.add(M.mul(M.cross(v,w),M.dot(u,u)),M.mul(M.cross(w,u),M.dot(v,v))),1/(2*w2))),radius=M.dist(center,a);return points.every(p=>Math.abs(M.dist(p,center)-radius)<Math.max(1e-6,radius*1e-4))?center:null;}
+/** Cached, scene-wide screen features; rebuilding is tied to document or camera changes. */
+export class InferenceIndex {
+ constructor(renderer){this.renderer=renderer;this.signature='';this.project=null;this.buckets=new Map();this.edges=[];this.acquired=null;}
+ invalidate(){this.signature='';this.project=null;}
+ ensure(project){const r=this.renderer,c=r.camera,key=JSON.stringify([c.save(),c.width,c.height,project.section]);if(this.project===project&&this.signature===key)return;this.project=project;this.signature=key;this.buckets.clear();this.edges=[];const matrix=c.matrices([0,0,0]).vp,screen=p=>projectWith(matrix,p,c.width,c.height);const clipped=p=>{const s=project.section;if(!s?.enabled)return false;return (p[{x:0,y:1,z:2}[s.axis]]-s.value)*(s.flip?-1:1)>1e-6;};
+  const add=(point,label,entry,extra={})=>{if(clipped(point))return;const p=screen(point);if(!p||p[0]<-CELL||p[1]<-CELL||p[0]>c.width+CELL||p[1]>c.height+CELL)return;const k=`${Math.floor(p[0]/CELL)},${Math.floor(p[1]/CELL)}`;if(!this.buckets.has(k))this.buckets.set(k,[]);this.buckets.get(k).push({point,screen:p,label,entry,...extra});};
+  for(const entry of r.entries||[]){if(!entry.visible||!entry.node.mesh)continue;const mesh=project.meshes[entry.node.mesh];if(!mesh)continue;const graph=adjacency(mesh),world=new Map(),screens=new Map(),visible=new Set(),get=i=>{if(!world.has(i)){world.set(i,M.transform(entry.matrix,mesh.vertices[i]));screens.set(i,screen(world.get(i)));}return world.get(i);};
+   for(const e of graph.edges.values()){if(e.hidden||e.soft||e.smooth)continue;if(e.faces.size&&![...e.faces].some(id=>{const f=graph.faces.get(id);return !f.hidden&&(!f.tag||tagVisible(project,f.tag));}))continue;const a=get(e.a),b=get(e.b),pa=screens.get(e.a),pb=screens.get(e.b),direction=M.norm(M.sub(b,a));visible.add(e.a);visible.add(e.b);add(M.mul(M.add(a,b),.5),'Midpoint',entry,{edgeKey:e.key,direction});if(pa&&pb&&(!clipped(a)||!clipped(b)))this.edges.push({a,b,pa,pb,entry,edgeKey:e.key,direction});}
+   for(const id of visible)add(get(id),'Endpoint',entry,{vertex:id});
+   for(const f of mesh.faces){if(f.hidden||f.tag&&!tagVisible(project,f.tag))continue;const pts=f.loops[0]?.map(get)||[];if(!pts.length)continue;const center=loopCenter(pts);add(center||M.mul(pts.reduce((a,b)=>M.add(a,b),[0,0,0]),1/pts.length),center?'Center':'Face center',entry,{faceId:f.id});}
+   for(const curve of mesh.curves||[])if(curve.center)add(M.transform(entry.matrix,curve.center),'Center',entry,{curve});
+  }
+  for(const guide of project.guides||[]){if(guide.point)add(guide.point,'Guide point',null);if(guide.a&&guide.b){const pa=screen(guide.a),pb=screen(guide.b);if(pa&&pb)this.edges.push({a:guide.a,b:guide.b,pa,pb,entry:null,direction:M.norm(M.sub(guide.b,guide.a))});}}
+  add([0,0,0],'Origin',null);
+ }
+ query(project,pos,{plane=null,exclude=null,radius=11,occlusion=true,edgesOnly=false}={}){this.ensure(project);const candidates=[],cx=Math.floor(pos.x/CELL),cy=Math.floor(pos.y/CELL),accept=c=>(!exclude||!c.entry||!exclude.has(c.entry.node.id))&&(!plane||Math.abs(M.dot(M.sub(c.point,plane.point),plane.normal))<1e-5);
+  if(!edgesOnly)for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(const c of this.buckets.get(`${cx+dx},${cy+dy}`)||[]){const d=Math.hypot(c.screen[0]-pos.x,c.screen[1]-pos.y);if(d<radius&&accept(c))candidates.push({...c,distance:d,rank:0});}
+  for(const edge of this.edges){if(Math.max(edge.pa[0],edge.pb[0])+radius<pos.x||Math.min(edge.pa[0],edge.pb[0])-radius>pos.x||Math.max(edge.pa[1],edge.pb[1])+radius<pos.y||Math.min(edge.pa[1],edge.pb[1])-radius>pos.y)continue;const near=nearestOnProjectedEdge(pos,edge.a,edge.b,edge.pa,edge.pb),c={...edge,...near,label:'On edge',rank:1};if(near.distance<radius*.7&&accept(c))candidates.push(c);}
+  candidates.sort((a,b)=>a.rank-b.rank||a.distance-b.distance);for(const c of candidates){if(occlusion&&c.entry&&this.renderer.raycast){const screen=this.renderer.camera.project(c.point);if(!screen)continue;const hit=this.renderer.raycast(screen[0],screen[1]);if(hit&&hit.distance+Math.max(1e-5,hit.distance*1e-5)<M.dist(this.renderer.camera.ray(screen[0],screen[1]).origin,c.point))continue;}this.acquired=c;return c;}return null;
+ }
+}
+export function inferAxis(camera,pos,anchor,point,directions=AXES){let best=null;for(const [axis,direction] of Object.entries(directions)){const d=M.norm(direction),candidate=M.add(anchor,M.mul(d,M.dot(M.sub(point,anchor),d))),s=camera.project(candidate);if(!s)continue;const distance=Math.hypot(s[0]-pos.x,s[1]-pos.y);if(distance<8&&(!best||distance<best.distance))best={point:candidate,direction:d,axis,label:axis.toUpperCase()+' inference',distance};}return best;}

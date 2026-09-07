@@ -19,6 +19,7 @@ parser.add_argument('--timeout', type=int, default=120000, help='Page/model time
 args = parser.parse_args()
 report = {'scope': 'Real browser startup and WebGPU frame/picking/capture smoke test',
           'url': args.url, 'status': 'NOT_RUN', 'checks': [], 'pageErrors': [], 'gpuErrors': []}
+(ROOT/'test-results').mkdir(exist_ok=True)
 exit_code = 2
 try:
     with sync_playwright() as p:
@@ -39,12 +40,14 @@ try:
         if not state['ready']:
             report['reason'] = state['error'] or 'No initialized WebGPU renderer.'
         else:
-            page.wait_for_function('singletake.renderer.stats.triangles > 0', timeout=args.timeout)
-            report['checks'].append('Bundled Home.skp imports and submits nonempty geometry')
+            page.evaluate('singletake.primitiveDialog("box")')
+            page.locator('button',has_text='Create box').click()
+            page.wait_for_function('singletake.renderer.stats.triangles > 12', timeout=args.timeout)
+            report['checks'].append('Empty workspace axes and a new solid submit native draw commands')
             # Exercise distinct pipelines, clipping, picking and the PNG readback path.
             page.evaluate('''async () => {
                 const a=singletake,r=a.renderer;
-                for (const style of [0,1,2,3]) {
+                r.axes=true;r.backEdges=true;for (const style of [0,1,2,3]) {
                     r.style=style;r.requestRender();
                     await new Promise(resolve=>setTimeout(resolve,120));
                 }
@@ -73,7 +76,7 @@ try:
             report['stats'] = page.evaluate('singletake.renderer.stats')
             report['gpuErrors'] = page.evaluate('[...singletake.gpuErrors]')
             report['status'] = 'PASS' if not (report['pageErrors'] or report['gpuErrors']) else 'FAIL'
-            page.screenshot(path=str(ROOT/'docs/viewport-check.png'), full_page=True)
+            page.screenshot(path=str(ROOT/'test-results/viewport-check.png'), full_page=True)
             exit_code = 0 if report['status'] == 'PASS' else 1
         browser.close()
 except Exception as exc:
@@ -82,7 +85,7 @@ except Exception as exc:
         report['status'] = 'FAIL'
         exit_code = 1
 finally:
-    (ROOT/'docs').mkdir(exist_ok=True)
-    (ROOT/'docs/browser-smoke-report.json').write_text(json.dumps(report, indent=2))
+    (ROOT/'test-results').mkdir(exist_ok=True)
+    (ROOT/'test-results/browser-smoke-report.json').write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
 sys.exit(exit_code)

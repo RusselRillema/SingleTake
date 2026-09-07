@@ -1,78 +1,37 @@
-# Architecture
+# SingleTake architecture
 
-## Overview
+## Document and geometry
 
-```
-    → import-worker.js → format parser → native project
-    → Document (undoable state and hierarchy)
-    → mesh triangulation + per-mesh BVH
-    → Renderer (GPU buffers, instances, materials, frame planning)
-    → WebGPU passes → viewport
+`src/core/document.js` owns a versioned native document: immutable meshes, parent-relative placed nodes, materials, tags/folders, guides, static measurements, scenes and clipping state. Transactions copy metadata and replace edited meshes. Undo retains before/after states; precise amendments rebuild from the immediately preceding operation's before-state.
 
-Pointer / keyboard / inspector / command palette
-    → Tools / App → Document transaction → changed meshes + transforms
-    → renderer update + panels + browser-local recovery
+The modeling frame is right-handed and Z-up. `coordinates.js` converts it to the renderer's Y-up frame. CPU editing uses double-precision numbers; GPU data uses camera-relative float coordinates.
 
-Native project → format writers → downloaded Blob
-```
+`geometry/topology.js` caches adjacency per immutable mesh. Faces refer to ordered vertex loops and holes. Soft edges join surfaces, and graph traversal separates connected islands from unrelated geometry sharing one resource. Raw merges weld positions, split supported planar chords and form interior loops. They do not imply a general exact intersection kernel.
 
-The application is plain HTML, CSS and JavaScript ES modules. `server.mjs` is a small local-only static server, not a modeling or conversion backend. All asset processing is performed in the browser. There is no runtime dependency installer or network service.
+Groups isolate edits and duplicate with independent raw resources. Components share resources. `core/components.js` mirrors structural edits in an active definition to other placements while retaining external placement transforms. Tags are visibility attributes, not containers; parent tags and folder visibility both affect effective scene state.
 
-## Code map
+## Interaction
 
-| Module | Responsibility |
-|---|---|
-| `src/app.js` | Application lifecycle, inspector/outliner/materials/scenes, commands, selection, dialogs and exports |
-| `src/ui/tools.js` | Pointer gestures, drawing state machines, inference, numeric input, operation previews and SVG overlays |
-| `src/core/document.js` | Native project structure, hierarchy resolution, validation, copy-on-write transactions and undo/redo |
-| `src/core/math.js` | Float64 vector/matrix math, coordinate conversions, camera/frustum helpers, bounds and units |
-| `src/geometry/triangulate.js` | Planar loop projection, hole handling and polygon triangulation |
-| `src/geometry/mesh.js` | Mesh creation, manipulation, extrusion/inset/sweep, topology metrics, smoothing and render baking |
-| `src/geometry/bvh.js` | Per-mesh CPU acceleration structure for face intersection |
-| `src/geometry/csg.js` | Tolerance-based BSP Boolean solids and result stitching |
-| `src/render/camera.js` | Camera state, perspective/parallel projection, orbit/pan/zoom and projection/ray conversion |
-| `src/render/renderer.js` | WebGPU lifecycle, resource caches, batching, culling, passes, picking, PNG and diagnostics |
-| `src/render/shaders.js` | WGSL lighting, shadows, edges, clipping, picking and grid logic |
-| `src/importers/skp.js` | Modern VFF/ZIP SKP parsing and native-project reconstruction |
-| `src/importers/formats.js` | GLB/glTF, OBJ/MTL, STL, PLY, DXF and native-project readers |
-| `src/exporters/formats.js` | GLB, OBJ ZIP, STL, PLY, DXF and native-project writers |
-| `src/io/zip.js` | ZIP entry handling, compression/decompression plumbing and CRC |
-| `src/io/import-worker.js` | Isolated import job, progress and transfer of input ArrayBuffers |
-| `src/io/operation-worker.js` | Isolated Boolean operation job |
-| `src/io/persistence.js` | IndexedDB workspace storage |
+`ui/shortcuts.js` is the shortcut source of truth. `ui/tools.js` manages pending operations, pointer gestures, temporary navigation, numeric inputs and previews. `ui/model-interactions.js` integrates context selection, topology edits, container semantics, tags and DOM panels into the application shell.
 
-## Native model
+`ui/inference.js` caches visible scene features in screen-space buckets. Edge interpolation is perspective-correct; CPU ray hits reject obscured candidates. Document/camera changes invalidate the cache. This is bounded geometric inference, not a symbolic constraint solver.
 
-Coordinates are JavaScript numbers in **meters, Y-up**. Matrices are 16-number, column-major affine transforms. A project stores meshes by ID and a separate hierarchy of nodes. Each node has an optional mesh reference, parent ID, local matrix, name, tag, material override, visibility and lock state. Multiple nodes can refer to one mesh; editing the shared mesh changes its placements.
+Push/Pull projects a transformed viewer-facing face normal into screen space. Drag displacement along that projection is converted back to a local displacement vector. Valid complete caps move existing shared vertices; other faces gain side walls and a cap. Invalid collapse or nonplanar edits reject. Arbitrary solid-intersection healing is not silently inferred.
 
-A mesh contains vertex triplets, ordered face loops and optional hole loops, explicit source edges, and a revision. Faces can contain material references, normals, per-loop UVs, optional corner normals, hidden flags and source tags. Triangles are a derived rendering/export representation, not the only editable representation.
+## WebGPU
 
-Materials contain normalized sRGB color/opacity, scalar roughness/metalness, and an optional texture with embedded typed bytes. Source import reports are retained as metadata. Tags, camera views, static measurements and section settings are first-class project data. `.take` serialization represents byte arrays explicitly in JSON; there is no compact proprietary binary native format.
+`render/renderer.js` owns the adapter/device, indexed mesh buffers, object/instance storage, materials, uniforms and pipelines. Mesh resources are baked and accelerated once. Render plans batch visible placements by geometry/material; CPU frustum tests reject off-screen bounds. Frames are requested on demand.
 
-## State and transactions
+Opaque meshes precede sorted transparent batches. Four-sample MSAA and depth testing support the main pass. A directional depth pass supplies shadows. Separate native pipelines draw edges, dashed obscured edges and XYZ world-origin axes. Preview meshes are temporary resources, not mutations of committed document data. Surrounding objects can fade while editing a context.
 
-`Document.transaction(label, fn)` creates a new state snapshot. Nodes and mutable metadata are copied; mesh data is shared until a geometry operation replaces that mesh with a clone. This avoids cloning every vertex in a large imported model for a simple transform. The undo stack is capped at 100 snapshots. Older snapshots retain referenced mesh/material payloads until released, so extensive edits can still consume significant memory.
+`render/shaders.js` contains WGSL. Integer GPU picking identifies objects; CPU BVHs return precise source faces. Capture maps a copied GPU texture and encodes PNG. Errors/device loss are surfaced explicitly. Optional device timestamp queries report actual GPU durations only when available.
 
-Preview transforms are renderer state, not committed project edits. A tool accepts its final value and commits one transaction. Boolean operations run in a worker and have a revision guard so a stale worker result does not silently overwrite intervening changes. Canceling a load terminates its worker. New drawings form separate mesh objects; a future full topology-editing kernel would need to add cross-object intersections, split/heal invariants and robust adjacency operations.
+## Files and persistence
 
-## Rendering path
+Imports run in a module worker. The VFF reader checks supported ZIP records/CRC, walks bounded binary records, reconstructs face loops, resolves nested placements and converts units. It does not substitute thumbnails for geometry. No native SDK or conversion service is bundled.
 
-Mesh baking produces 32-byte vertices: position `float32x3`, normal `float32x3`, UV `float32x2`, plus uint32 indices grouped by material/tag. Per-mesh CPU BVHs use the baked triangle-to-source-face mapping. Edge buffers distinguish visible source/topological edges from a full wire representation. Existing GPU buffers are reused while their source mesh object is unchanged, and obsolete buffers/textures are explicitly destroyed.
+GLB retains shared meshes; formats without hierarchy flatten visible placements. Native files preserve the application document and encoded assets. IndexedDB provides recovery, not archival backup. The application does not upload selected files.
 
-Each frame resolves visible scene instances and transformed bounds, derives a camera-relative origin, and culls on the CPU. Instanced draw commands share geometry and material buffers. Instance matrices and draw-to-instance lookup data live in storage buffers. Opaque groups are batched; transparent groups sort by object distance. Device storage-buffer and texture-size limits are checked, but this is not an out-of-core scene streamer.
+## Validation boundaries
 
-Passes include a directional depth shadow map, opaque and blended MSAA shading, and overlaid depth-tested edges. A separate integer ID target supports object picking; a CPU BVH refines face selection in local mesh space. Texture mips are generated with a small GPU render pipeline. Section tests are applied in the appropriate shaders and CPU hit tests. Section surfaces are not capped.
-
-The renderer schedules frames on demand. Diagnostics distinguish CPU command-encoding duration from optional GPU timestamp-query duration. PNG capture copies the presentation texture into an aligned readback buffer before mapping it; it does not capture the separate DOM/SVG annotation layers. Device loss is surfaced to the interface and can be retried by saving recovery data and reloading.
-
-## Import flow and limits
-
-Input bytes transfer to an import worker so parsing does not run on the UI thread. The returned project is structured-cloned; mesh baking/BVH construction and GPU upload currently occur on the main thread and can cause a startup pause. A future performance pass should move more triangulation/BVH work to workers, build a bounded upload queue, and profile actual hardware before setting budgets.
-
-SKP is read as a modern VFF container with an embedded ZIP and TLV geometry records. Component definitions remain shared, and nested transforms are converted by an inches/Z-up to meters/Y-up basis change. The reader recovers understood entities and reports known fidelity gaps. It is not the official SDK and does not retain opaque source data for a lossless native SKP save.
-
-GLB/glTF external references resolve only against selected companion files or data URIs; the importer does not fetch arbitrary texture URLs. Unitless mesh formats use the workspace import-scale setting. Geometry exporters work from the native model; editor-only metadata survives only in the native format.
-
-## Trust boundary
-
-The static server listens on `127.0.0.1`, and uploaded filenames are not executable scripts. UI content is escaped, and output files are constructed as Blobs. Importers validate important lengths, references and numeric values, while complex algorithms have some explicit limits. Those checks are not a security audit. Huge or adversarial input may exhaust CPU/memory; ZIP decompression, XML-related metadata, triangulation and recursive scene/CSG processing deserve dedicated fuzzing before untrusted public deployment.
+CPU tests check geometry, document transactions, transforms, selection, snapping, tags, components and exchange round-trips. DOM tests run actual controllers without initializing WebGPU. The separate real-browser test reports NOT_RUN when a GPU is unavailable or navigation is policy-blocked. CPU/DOM passes do not establish rendered correctness or performance.

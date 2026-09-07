@@ -1,0 +1,6 @@
+import * as M from './math.js';
+import {descendants} from './document.js';
+export function definitionContext(project,id){const map=new Map(project.nodes.map(n=>[n.id,n]));let n=map.get(id);while(n){if(n.component)return n;n=map.get(n.parent);}return null;}
+function structure(project,id){const ids=descendants(project,new Set([id]));return JSON.stringify(project.nodes.filter(n=>ids.has(n.id)&&n.id!==id).map(n=>[n.id,n.parent,n.mesh,n.component,n.matrix,n.name,n.tag,n.material,n.visible,n.locked]));}
+/** Mirror definition structure without duplicating shared geometry resources. */
+export function synchronizeDefinition(before,after,context){const source=definitionContext(after,context);if(!source||structure(before,source.id)===structure(after,source.id))return;const ids=descendants(after,new Set([source.id]));ids.delete(source.id);const children=after.nodes.filter(n=>ids.has(n.id));for(const target of after.nodes.filter(n=>n.component===source.component&&n.id!==source.id&&!ids.has(n.id))){const old=descendants(after,new Set([target.id]));old.delete(target.id);after.nodes=after.nodes.filter(n=>!old.has(n.id));const map=new Map(children.map(n=>[n.id,M.uid('n')]));for(const n of children)after.nodes.push({...n,id:map.get(n.id),parent:n.parent===source.id?target.id:map.get(n.parent),matrix:n.matrix.slice()});}}

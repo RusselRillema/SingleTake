@@ -88,6 +88,7 @@ fn gridLine(p: vec2<f32>, scale: f32) -> f32 {
  if(input.flags.x>.5 && material.surface.w<.5){color=mix(color,vec3<f32>(.10,.66,.48),.20);}
  if(frame.viewport.w==2.0 && material.surface.w<.5){color=vec3<f32>(.9,.92,.90);alpha=.03;}
  if(frame.viewport.w==3.0 && material.surface.w<.5){alpha=min(alpha,.22);}
+ if(input.flags.w<0.0){color=mix(color,vec3<f32>(.87,.88,.86),.72);}
  color=aces(color*frame.camera.w);
  return vec4<f32>(pow(color,vec3<f32>(1.0/2.2)),alpha);
 }
@@ -104,4 +105,23 @@ struct LineOutput { @builtin(position) position: vec4<f32>, @location(0) world: 
  if(frame.settings.x>.5&&dot(vec4<f32>(input.world,1.0),frame.clip)<0.0){discard;}
  return select(vec4<f32>(.22,.255,.24,.55),vec4<f32>(.02,.56,.36,1.0),input.flags.x>.5);
 }
+@fragment fn backLineFS(input:LineOutput)->@location(0) vec4<f32>{
+ if(frame.settings.x>.5&&dot(vec4<f32>(input.world,1.0),frame.clip)<0.0){discard;}
+ if(fract((input.position.x+input.position.y)/9.0)>.5){discard;}
+ return select(vec4<f32>(.30,.35,.32,.36),vec4<f32>(.02,.56,.36,.7),input.flags.x>.5);
+}
 `;
+/** Global axes are a separate pipeline, not part of the document or ground grid. */
+export const axisShader=`
+struct Frame {vp:mat4x4<f32>};
+@group(0) @binding(0) var<uniform> frame:Frame;
+struct Out {@builtin(position) position:vec4<f32>,@location(0) color:vec3<f32>,@location(1) distance:f32};
+@vertex fn vs(@location(0) position:vec3<f32>,@location(1) color:vec3<f32>,@location(2) distance:f32)->Out{
+ var out:Out;out.position=frame.vp*vec4<f32>(position,1.0);out.position.z-=.00001*out.position.w;out.color=color;out.distance=distance;return out;
+}
+@fragment fn fs(input:Out)->@location(0) vec4<f32>{
+ if(input.distance<0.0&&fract(abs(input.distance))>.55){discard;}
+ return vec4<f32>(input.color,.95);
+}
+`;
+

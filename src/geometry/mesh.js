@@ -2,42 +2,34 @@ import * as M from '../core/math.js';
 import {triangulate,polygonArea} from './triangulate.js';
 export const face=(loops,material=null,extra={})=>({id:M.uid('f'),loops,material,...extra});
 export function mesh(vertices=[],faces=[],name='Mesh'){return {id:M.uid('m'),name,vertices,faces,edges:[],revision:0};}
-export function cloneMesh(m){return {...m,vertices:m.vertices.map(v=>v.slice()),faces:m.faces.map(f=>({...f,loops:f.loops.map(l=>l.slice()),uv:f.uv?structuredClone(f.uv):undefined})),edges:m.edges?.map(e=>({...e})),revision:(m.revision||0)+1};}
+export function cloneMesh(m){return {...m,vertices:m.vertices.map(v=>v.slice()),faces:m.faces.map(f=>({...f,loops:f.loops.map(l=>l.slice()),uv:f.uv?structuredClone(f.uv):undefined})),edges:(m.edges||[]).map(e=>({...e})),curves:(m.curves||[]).map(c=>({...c,center:c.center?.slice(),vertices:c.vertices?.slice()})),revision:(m.revision||0)+1};}
 export function box(w=2,h=2,d=2){const v=[[0,0,0],[w,0,0],[w,0,d],[0,0,d],[0,h,0],[w,h,0],[w,h,d],[0,h,d]];return mesh(v,[[0,1,2,3],[4,7,6,5],[0,4,5,1],[1,5,6,2],[2,6,7,3],[3,7,4,0]].map(l=>face([l])),'Box');}
 export function rectangle(a,b,basis={u:[1,0,0],v:[0,0,-1]}){const delta=M.sub(b,a),u=M.mul(basis.u,M.dot(delta,basis.u)),v=M.mul(basis.v,M.dot(delta,basis.v));return mesh([a,M.add(a,u),M.add(M.add(a,u),v),M.add(a,v)],[face([[0,1,2,3]])],'Rectangle');}
-export function circle(center,radius,segments=48,normal=[0,1,0]){if(radius<=1e-7)throw Error('Radius must be positive.');segments=M.clamp(Math.round(segments),3,256);const {u,v}=M.planeBasis(normal),vs=Array.from({length:segments},(_,i)=>M.add(center,M.add(M.mul(u,radius*Math.cos(i*Math.PI*2/segments)),M.mul(v,radius*Math.sin(i*Math.PI*2/segments)))));return mesh(vs,[face([vs.map((_,i)=>i)])],'Circle');}
+export function circle(center,radius,segments=24,normal=[0,1,0]){if(radius<=1e-7)throw Error('Radius must be positive.');segments=M.clamp(Math.round(segments),3,2048);const {u,v}=M.planeBasis(normal),vs=Array.from({length:segments},(_,i)=>M.add(center,M.add(M.mul(u,radius*Math.cos(i*Math.PI*2/segments)),M.mul(v,radius*Math.sin(i*Math.PI*2/segments)))));const result=mesh(vs,[face([vs.map((_,i)=>i)])],'Circle');result.curves=[{type:'circle',center:center.slice(),normal:normal.slice(),radius,vertices:vs.map((_,i)=>i)}];return result;}
 export function sphere(radius=1,segments=32,rings=16){const vs=[[0,radius,0]],fs=[];for(let j=1;j<rings;j++)for(let i=0;i<segments;i++){const phi=j*Math.PI/rings,theta=i*2*Math.PI/segments;vs.push([radius*Math.sin(phi)*Math.cos(theta),radius*Math.cos(phi),radius*Math.sin(phi)*Math.sin(theta)]);}const bottom=vs.push([0,-radius,0])-1;for(let i=0;i<segments;i++)fs.push(face([[0,1+(i+1)%segments,1+i]]));for(let j=0;j<rings-2;j++)for(let i=0;i<segments;i++){const a=1+j*segments+i,b=1+j*segments+(i+1)%segments;fs.push(face([[a,b,b+segments,a+segments]]));}for(let i=0;i<segments;i++)fs.push(face([[bottom,1+(rings-2)*segments+i,1+(rings-2)*segments+(i+1)%segments]]));const m=mesh(vs,fs,'Sphere');m.smooth=true;return m;}
 export function polygon(points,normal=null){if(points.length<3)throw Error('A face needs at least three vertices.');const n=normal||M.faceNormal(points);if(M.len(n)<1e-8)throw Error('These points are collinear.');if(points.some(p=>Math.abs(M.dot(M.sub(p,points[0]),n))>1e-5))throw Error('Polygon points must lie on one plane.');const m=mesh(points.map(p=>p.slice()),[face([points.map((_,i)=>i)],null,{normal:n})],'Polygon');triangulate(m.vertices,m.faces[0].loops,n);return m;}
 /** Topological push/pull. Shared boundary remains welded to adjacent faces. */
-export function extrudeFace(input,faceId,distance){
- if(!Number.isFinite(distance)||Math.abs(distance)<1e-8)throw Error('Enter a nonzero extrusion distance.');
- const m=cloneMesh(input),idx=m.faces.findIndex(f=>f.id===faceId);if(idx<0)throw Error('Select a face first.');
- const f=m.faces[idx],n=f.normal||M.faceNormal(f.loops[0].map(i=>m.vertices[i])),map=new Map();
- for(const l of f.loops)for(const i of l)if(!map.has(i)){map.set(i,m.vertices.length);m.vertices.push(M.add(m.vertices[i],M.mul(n,distance)));}
- const usedElsewhere=new Set(m.faces.filter(x=>x!==f).flatMap(x=>x.loops.flat()));
- const standalone=f.loops.flat().every(i=>!usedElsewhere.has(i));
- // Moving a complete cap inward shortens its perpendicular walls, rather than
- // adding overlapping coplanar side walls inside the existing solid.
- if(!standalone&&distance<0){const boundary=new Set(f.loops.flat()),adjacent=m.faces.filter(other=>other!==f&&other.loops.some(l=>l.some(i=>boundary.has(i))));
-  if(adjacent.length&&adjacent.every(other=>Math.abs(M.dot(other.normal||M.faceNormal(other.loops[0].map(i=>m.vertices[i])),n))<1e-6)){
-   const moved=cloneMesh(input);for(const i of boundary)moved.vertices[i]=M.add(moved.vertices[i],M.mul(n,distance));
-   for(const other of moved.faces){const points=other.loops[0].map(i=>moved.vertices[i]),nn=M.faceNormal(points),old=input.faces.find(x=>x.id===other.id),on=old.normal||M.faceNormal(old.loops[0].map(i=>input.vertices[i]));
-    if(M.len(nn)<.5||M.dot(nn,on)<.01)throw Error('Push/pull would collapse or invert the solid. Use a smaller distance or Solid Difference.');
-    if(other.loops.flat().some(i=>Math.abs(M.dot(M.sub(moved.vertices[i],points[0]),nn))>1e-5))throw Error('This push/pull would make an adjacent face nonplanar.');
-    other.normal=nn;other.cornerNormals=undefined;}
-   moved.edges=[];return moved;
-  }
+export function extrudeFace(input,faceId,amount,{keepBase=false}={}) {
+ const index=input.faces.findIndex(f=>f.id===faceId);if(index<0)throw Error('Select a face first.');
+ const original=input.faces[index],normal=M.norm(original.normal||M.faceNormal(original.loops[0].map(i=>input.vertices[i]))),delta=Array.isArray(amount)?amount.slice():M.mul(normal,amount);
+ if(delta.length!==3||!delta.every(Number.isFinite)||M.len(delta)<1e-8)throw Error('Enter a nonzero extrusion distance.');const distance=M.dot(delta,normal);if(Math.abs(distance)<1e-9)throw Error('The extrusion must leave the face plane.');
+ const boundary=new Set(original.loops.flat()),adjacent=input.faces.filter(f=>f!==original&&f.loops.some(l=>l.some(i=>boundary.has(i)))),standalone=adjacent.length===0;
+ // A full cap shares its boundary with its walls: translate those vertices instead of stacking overlapping walls.
+ if(!standalone&&!keepBase&&adjacent.every(f=>Math.abs(M.dot(f.normal||M.faceNormal(f.loops[0].map(i=>input.vertices[i])),normal))<1e-6)){
+  const moved=cloneMesh(input);for(const i of boundary)moved.vertices[i]=M.add(moved.vertices[i],delta);
+  for(const f of moved.faces){if(!f.loops.some(l=>l.some(i=>boundary.has(i))))continue;const points=f.loops[0].map(i=>moved.vertices[i]),n=M.faceNormal(points),old=input.faces.find(x=>x.id===f.id),on=old.normal||M.faceNormal(old.loops[0].map(i=>input.vertices[i]));if(M.len(n)<.5||M.dot(n,on)<.01)throw Error('The face would collapse or invert the solid. Use a smaller distance.');if(f.loops.flat().some(i=>Math.abs(M.dot(M.sub(moved.vertices[i],points[0]),n))>1e-5))throw Error('This extrusion would make an adjacent face nonplanar.');f.normal=n;f.cornerNormals=undefined;f.uv=undefined;}
+  moved.curves=[];return moved;
  }
- const top={...f,loops:f.loops.map(l=>l.map(i=>map.get(i))),normal:n,uv:undefined,cornerNormals:undefined};
- m.faces.splice(idx,1,top);
- if(standalone)m.faces.push(face(f.loops.map(l=>l.slice().reverse()),f.material));
- for(const l of f.loops)for(let j=0;j<l.length;j++){const a=l[j],b=l[(j+1)%l.length];m.faces.push(face([[a,b,map.get(b),map.get(a)]],f.material));}
- if(standalone&&distance<0)for(const side of m.faces){side.loops=side.loops.map(l=>l.slice().reverse());if(side.normal)side.normal=M.mul(side.normal,-1);side.cornerNormals=undefined;}
- m.edges=[];return m;
+ const result=cloneMesh(input),f=result.faces[index],map=new Map();for(const id of boundary){map.set(id,result.vertices.length);result.vertices.push(M.add(result.vertices[id],delta));}
+ const firstNew=result.faces.length,top={...f,loops:f.loops.map(l=>l.map(i=>map.get(i))),normal,uv:undefined,cornerNormals:undefined};result.faces.splice(index,1,top);
+ if(standalone||keepBase)result.faces.push({...f,id:M.uid('f'),loops:standalone?f.loops.map(l=>l.slice().reverse()):f.loops.map(l=>l.slice()),normal:standalone?M.mul(normal,-1):normal,uv:undefined,cornerNormals:undefined});
+ for(const l of f.loops)for(let j=0;j<l.length;j++){const a=l[j],b=l[(j+1)%l.length];result.faces.push(face([[a,b,map.get(b),map.get(a)]],f.material));}
+ if(standalone&&distance<0)for(const changed of [top,...result.faces.slice(firstNew)]){changed.loops=changed.loops.map(l=>l.slice().reverse());if(changed.normal)changed.normal=M.mul(changed.normal,-1);changed.cornerNormals=undefined;}
+ for(const e of input.edges||[])if(map.has(e.a)&&map.has(e.b))result.edges.push({...e,a:map.get(e.a),b:map.get(e.b)});result.curves=[];return result;
 }
 /** Inset one planar face; builds a center face and an annular face with a hole. */
 export function offsetFace(input,faceId,distance){
- if(!Number.isFinite(distance)||distance<=1e-8)throw Error('Enter a positive inset distance.');
+ if(!Number.isFinite(distance)||Math.abs(distance)<=1e-8)throw Error('Enter a nonzero offset distance.');
  const m=cloneMesh(input),f=m.faces.find(f=>f.id===faceId);if(!f)throw Error('Select a face first.');if(f.loops.length!==1)throw Error('Offset currently requires a single-boundary face.');
  const loop=f.loops[0],pts=loop.map(i=>m.vertices[i]),n=f.normal||M.faceNormal(pts),{u,v}=M.planeBasis(n),origin=pts[0],p=pts.map(x=>[M.dot(M.sub(x,origin),u),M.dot(M.sub(x,origin),v)]);let signed=p.reduce((s,a,i)=>s+a[0]*p[(i+1)%p.length][1]-p[(i+1)%p.length][0]*a[1],0);const sign=Math.sign(signed);
  const inset=[];
@@ -46,9 +38,9 @@ export function offsetFace(input,faceId,distance){
   const n1=[-a[1]/la*sign,a[0]/la*sign],n2=[-b[1]/lb*sign,b[0]/lb*sign],bis=[n1[0]+n2[0],n1[1]+n2[1]],den=bis[0]*n1[0]+bis[1]*n1[1];if(Math.abs(den)<1e-9)throw Error('Offset is undefined at a folded corner.');
   const q=[cur[0]+bis[0]*distance/den,cur[1]+bis[1]*distance/den];inset.push(m.vertices.length);m.vertices.push(M.add(origin,M.add(M.mul(u,q[0]),M.mul(v,q[1]))));
  }
- for(const i of inset){const q=[M.dot(M.sub(m.vertices[i],origin),u),M.dot(M.sub(m.vertices[i],origin),v)];for(let j=0;j<p.length;j++){const a=p[j],b=p[(j+1)%p.length],dx=b[0]-a[0],dy=b[1]-a[1],t=M.clamp(((q[0]-a[0])*dx+(q[1]-a[1])*dy)/(dx*dx+dy*dy),0,1);if(Math.hypot(q[0]-a[0]-t*dx,q[1]-a[1]-t*dy)<distance-1e-6)throw Error('Inset exceeds the available face width or crosses another edge.');}}
+ if(distance>0)for(const i of inset){const q=[M.dot(M.sub(m.vertices[i],origin),u),M.dot(M.sub(m.vertices[i],origin),v)];for(let j=0;j<p.length;j++){const a=p[j],b=p[(j+1)%p.length],dx=b[0]-a[0],dy=b[1]-a[1],t=M.clamp(((q[0]-a[0])*dx+(q[1]-a[1])*dy)/(dx*dx+dy*dy),0,1);if(Math.hypot(q[0]-a[0]-t*dx,q[1]-a[1]-t*dy)<distance-1e-6)throw Error('Inset exceeds the available face width or crosses another edge.');}}
  const newLoop=face([inset],f.material);triangulate(m.vertices,newLoop.loops,n);
- f.loops=[loop,inset.slice().reverse()];f.uv=undefined;m.faces.push(newLoop);m.edges=[];return m;
+ if(distance>0){f.loops=[loop,inset.slice().reverse()];f.uv=undefined;m.faces.push(newLoop);}else m.faces.push(face([inset,loop.slice().reverse()],f.material));m.edges=[];return m;
 }
 export function sweep(profile,path){
  if(profile.length<3||path.length<2)throw Error('Sweep needs a closed profile and a path with at least two points.');
@@ -57,7 +49,7 @@ export function sweep(profile,path){
  const n=profile.length;faces.push(face([Array.from({length:n},(_,i)=>n-1-i)]));faces.push(face([Array.from({length:n},(_,i)=>(path.length-1)*n+i)]));
  for(let j=0;j<path.length-1;j++)for(let i=0;i<n;i++)faces.push(face([[j*n+i,j*n+(i+1)%n,(j+1)*n+(i+1)%n,(j+1)*n+i]]));return mesh(verts,faces,'Sweep');
 }
-export function transformMesh(input,matrix){const m=cloneMesh(input);m.vertices=m.vertices.map(p=>M.transform(matrix,p));for(const f of m.faces){f.normal=undefined;f.cornerNormals=undefined;}return m;}
+export function transformMesh(input,matrix){const m=cloneMesh(input);m.vertices=m.vertices.map(p=>M.transform(matrix,p));for(const f of m.faces){f.normal=undefined;f.cornerNormals=undefined;}for(const c of m.curves||[]){if(c.center)c.center=M.transform(matrix,c.center);if(c.normal)c.normal=M.norm(M.transform(M.transpose(M.inverse(matrix)),c.normal,0));}return m;}
 export function weld(input,tolerance=1e-6){const m=cloneMesh(input),map=new Map(),remap=[],vs=[];for(const v of m.vertices){const key=v.map(x=>Math.round(x/tolerance)).join(',');let idx=map.get(key);if(idx===undefined){idx=vs.length;vs.push(v);map.set(key,idx);}remap.push(idx);}m.vertices=vs;for(const f of m.faces)f.loops=f.loops.map(l=>l.map(i=>remap[i]).filter((v,i,a)=>v!==a[(i+a.length-1)%a.length]));m.faces=m.faces.filter(f=>f.loops[0].length>=3);m.edges=[];return m;}
 export function topology(m){
  const edgeMap=new Map();let area=0,volume=0,triangles=0,degenerate=0;
@@ -96,6 +88,6 @@ export function bakeMesh(m){
  const explicit=new Map((m.edges||[]).map(e=>[e.a<e.b?`${e.a}:${e.b}`:`${e.b}:${e.a}`,e]));
  for(const e of m.edges||[])if(!edges.has(e.a<e.b?`${e.a}:${e.b}`:`${e.b}:${e.a}`))edges.set(e.a<e.b?`${e.a}:${e.b}`:`${e.b}:${e.a}`,{...e,normals:[]});
  const lines=[],wire=[];
- for(const [key,e] of edges){const a=m.vertices[e.a],b=m.vertices[e.b];if(!a||!b)continue;wire.push(...a,...b);const flag=explicit.get(key);if(flag?.hidden||flag?.smooth||m.smooth)continue;if(e.normals.length!==2||M.dot(e.normals[0],e.normals[1])<.9995)lines.push(...a,...b);}
+ for(const [key,e] of edges){const a=m.vertices[e.a],b=m.vertices[e.b];if(!a||!b)continue;wire.push(...a,...b);const flag=explicit.get(key);if(flag?.hidden||flag?.soft||flag?.smooth||m.smooth)continue;if(flag||e.normals.length!==2||M.dot(e.normals[0],e.normals[1])<.9995)lines.push(...a,...b);}
  return {groups:[...groups.values()].map(g=>({...g,vertices:new Float32Array(g.vertices),indices:new Uint32Array(g.indices)})),lines:new Float32Array(lines),wire:new Float32Array(wire),bounds:M.bounds(m.vertices),triangles,errors};
 }
