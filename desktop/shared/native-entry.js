@@ -21,6 +21,9 @@ globalThis.mount=async()=>{
   diagnostics:()=>({ui:'shared',controller:'src/app.js',sources:sourceHashes,objects:app?.doc.project.nodes.length||0,canvas:app?.renderer.rectangle,renderer:'native-opengl',browser:false}),
   // Acceptance uses the same visible dialog, form submission and controller as the user.
   startSmoke:async()=>{
+   const canvas=app.canvas.getBoundingClientRect(),footer=document.querySelector('.statusbar').getBoundingClientRect();
+   if(canvas.width<=0||canvas.height<=0||canvas.top<0||canvas.bottom>innerHeight||footer.bottom>innerHeight+1)
+    throw Error('The shared canvas and status bar must fit inside the native window.');
    await app.action('box');const form=document.querySelector('#primitive-form');if(!form)throw Error('Shared primitive dialog was not created.');
    form.querySelector('[name="dimensions"]').value='2 m, 2 m, 2 m';
    form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
@@ -30,7 +33,7 @@ globalThis.mount=async()=>{
   }
  };
  await app.init();
- if(!app.ready)throw Error('The shared application could not initialize the native viewport.');
+ if(!app.ready)throw app.initializationError||Error('The shared application could not initialize the native viewport.');
  const canonical=['.topbar','.commandbar','.tool-rail','.inspector','.statusbar','#measurement-input','#outliner','#canvas'];
  for(const selector of canonical)if(!document.querySelector(selector))throw Error('Missing shared UI: '+selector);
  await invoke('ready',{ui:'shared',sources:sourceHashes});

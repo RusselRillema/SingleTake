@@ -18,10 +18,11 @@ public sealed class MainWindow : Window
     private readonly WebSceneComponentHost component;
     private readonly NativeViewport viewport = new() { IsHitTestVisible = false, Focusable = false };
     private readonly Canvas nativeLayer = new() { IsHitTestVisible = false, ClipToBounds = true };
-    private readonly TextBlock error = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(24) };
+    private readonly TextBlock error = new() { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Black, Margin = new Thickness(24) };
     private readonly Border errorPanel;
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim frameGate = new(1, 1);
+    private TaskCompletionSource<bool> applicationReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private SceneStore store = new();
     private readonly bool smoke = Environment.GetCommandLineArgs().Contains("--native-smoke");
     private bool mounted, closing, allowClose, smokeCompleted, sharedReady;
@@ -47,6 +48,8 @@ public sealed class MainWindow : Window
         errorPanel = new Border { Background = Brushes.White, Child = error, IsVisible = false };
         root.Children.Add(errorPanel);
         Content = root;
+        component.View.JavaScriptException += e => Report("JavaScript: " + e.Message + "\n" + e.Stack);
+        component.View.RuntimeFailed += e => Report("Native runtime: " + e.Message + "\n" + e.Stack);
 
         viewport.CaptureAcceptancePixels = smoke;
         viewport.Failed += Report;
@@ -83,10 +86,12 @@ public sealed class MainWindow : Window
             }
             await component.MountAsync(lifetime.Token);
             mounted = true;
-            if (!sharedReady) throw new InvalidOperationException("The shared application did not finish mounting.");
+            await applicationReady.Task.WaitAsync(TimeSpan.FromSeconds(30), lifetime.Token);
             if (component.View.Content is Control inputSurface) inputSurface.Focus();
             if (smoke) await component.View.EvaluateTextAsync("globalThis.SingleTakeDesktop.startSmoke()");
         }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (TimeoutException) { Report("The shared application did not report ready within 30 seconds."); }
         catch (Exception ex) { Report("Native startup failed: " + ex.Message); }
     }
 
@@ -144,13 +149,13 @@ public sealed class MainWindow : Window
             case "reload":
                 // Return the bridge reply before unmounting the caller's engine context.
                 Dispatcher.UIThread.Post(async () => {
-                    try { mounted = false; sharedReady = false; store = new SceneStore(); await component.ReloadAsync(lifetime.Token); mounted = true; errorPanel.IsVisible = false; }
+                    try { mounted = false; sharedReady = false; applicationReady = new(TaskCreationOptions.RunContinuationsAsynchronously); store = new SceneStore(); await component.ReloadAsync(lifetime.Token); mounted = true; await applicationReady.Task.WaitAsync(TimeSpan.FromSeconds(30), lifetime.Token); errorPanel.IsVisible = false; }
                     catch (Exception ex) { Report("Reload failed: " + ex.Message); }
                 }, DispatcherPriority.Background);
                 result = new { requested = true }; break;
             case "ready":
                 if (args.GetProperty("ui").GetString() != "shared") throw new InvalidDataException("A separate desktop UI is not supported.");
-                sharedReady = true; result = new { native = true, ui = "shared", schema = 1 }; break;
+                sharedReady = true; applicationReady.TrySetResult(true); result = new { native = true, ui = "shared", schema = 1 }; break;
             default: throw new InvalidOperationException("Host method is not allowed: " + method);
         }
         return JsonSerializer.SerializeToElement(result, SceneStore.JsonOptions);
@@ -178,6 +183,8 @@ public sealed class MainWindow : Window
 
     private void Report(string message)
     {
+        if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => Report(message)); return; }
+        Console.Error.WriteLine(message);
         error.Text = message; errorPanel.IsVisible = true; System.Diagnostics.Trace.WriteLine(message);
         if (smoke) CompleteSmoke(1, message);
     }

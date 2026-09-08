@@ -20,7 +20,7 @@ export class App {
   this.buildToolbar();this.bind();this.refreshTools();this.renderPanels();
  }
  async init(){
-  try{await this.renderer.init();this.ready=true;if(this.renderer.capabilities?.shadows===false){const control=$('#shadows-toggle');control.checked=false;control.disabled=true;control.title='Shadow maps are not implemented by the active native renderer.';}$('#engine-label').textContent=this.platform.engineLabel;}catch(e){this.gpuFailure(e.message);}
+  try{await this.renderer.init();this.ready=true;if(this.renderer.capabilities?.shadows===false){const control=$('#shadows-toggle');control.checked=false;control.disabled=true;control.title='Shadow maps are not implemented by the active native renderer.';}$('#engine-label').textContent=this.platform.engineLabel;}catch(e){this.initializationError=e;this.gpuFailure(e.message);}
   let saved;try{saved=await this.platform.loadWorkspace();if(saved)validateProject(saved.project);}catch(e){this.toast('Local recovery is unavailable: '+e.message,'warning');saved=null;}
   try{if(saved){this.doc.replace(saved.project);if(saved.camera)this.renderer.camera.restore(saved.camera);this.toast('Recovered your local workspace.','success');this.expanded.add(this.doc.project.nodes[0]?.id);}else this.doc.replace(newProject());}catch(e){this.toast(e.message,'error');this.doc.replace(newProject());}
   this.startup=false;this.hideLoading();this.renderPanels();if(this.ready){await this.renderer.setProject(this.doc.project);if(!saved)this.fit();this.tools.overlay();}

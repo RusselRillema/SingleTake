@@ -73,9 +73,9 @@ public sealed class SceneStore
         Id(f.DocumentId); Require(f.Name.Length <= 1024, "Model title too long.");
         Finite(f.ViewProjection, 16); Finite(f.Eye, 3); Finite(f.Origin, 3); Finite(f.Section, 4);
         Require(double.IsFinite(f.Width) && double.IsFinite(f.Height) && f.Width > 0 && f.Height > 0 && f.Width <= 65536 && f.Height <= 65536, "Invalid viewport size.");
-        if (f.Viewport is { } r) {
-            Require(double.IsFinite(r.Left) && double.IsFinite(r.Top) && r.Left >= 0 && r.Top >= 0 && r.Left <= 65536 && r.Top <= 65536, "Invalid DOM viewport offset.");
-            Require(double.IsFinite(r.Width) && double.IsFinite(r.Height) && Math.Abs(r.Width-f.Width)<0.01 && Math.Abs(r.Height-f.Height)<0.01, "DOM and camera sizes disagree.");
+        if (f.Viewport is { } viewport) {
+            Require(double.IsFinite(viewport.Left) && double.IsFinite(viewport.Top) && viewport.Left >= 0 && viewport.Top >= 0 && viewport.Left <= 65536 && viewport.Top <= 65536, "Invalid DOM viewport offset.");
+            Require(double.IsFinite(viewport.Width) && double.IsFinite(viewport.Height) && Math.Abs(viewport.Width-f.Width)<0.01 && Math.Abs(viewport.Height-f.Height)<0.01, "DOM and camera sizes disagree.");
         }
         Require(float.IsFinite(f.Exposure) && f.Exposure is >= 0.1f and <= 5f, "Invalid exposure.");
         Require(float.IsFinite(f.CameraDistance) && f.CameraDistance > 0 && f.Style is >= 0 and <= 3, "Invalid view parameters.");

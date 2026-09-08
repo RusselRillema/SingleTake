@@ -14,7 +14,7 @@ export class NativeRenderer extends SceneProxy {
   if(typeof ResizeObserver==='function'){this.observer=new ResizeObserver(this.onResize);this.observer.observe(this.canvas);}
   // Layout is owned by WebScene. Do not invent a separate viewport size or sidebar offset.
   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-  this.resize();if(!this.rectangle)throw Error('The shared canvas did not receive a usable layout from the UI runtime.');
+  this.resize();if(!this.rectangle)throw Error('The shared canvas did not receive a usable layout from the UI runtime. Canvas size: '+this.canvas.getBoundingClientRect().width+' × '+this.canvas.getBoundingClientRect().height);
   this.active=true;this.requestRender();
  }
  resize(){
