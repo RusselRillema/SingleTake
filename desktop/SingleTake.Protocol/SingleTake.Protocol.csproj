@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><Description>Bounded native scene and input protocol for SingleTake.</Description></PropertyGroup>
+</Project>

@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><IsTestProject>false</IsTestProject></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../SingleTake.Protocol/SingleTake.Protocol.csproj" /></ItemGroup>
+</Project>

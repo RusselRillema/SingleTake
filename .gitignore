@@ -12,3 +12,12 @@ playwright-report/
 __pycache__/
 .DS_Store
 dist.staging/
+
+# Native build outputs and local Rider state
+**/bin/
+**/obj/
+artifacts/
+.packages/
+.idea/
+*.user
+desktop/SingleTake.Desktop/Components/Modeler/main.js

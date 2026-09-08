@@ -29,8 +29,8 @@ export function findMatches(text,rules){
  }
  return [...matches];
 }
-const excluded=new Set(['.git','node_modules','dist','site','test-results','playwright-report','coverage','__pycache__']);
-const textExtensions=new Set(['.js','.mjs','.json','.md','.html','.css','.yml','.yaml','.py','.ps1','.sh','.txt','.svg']);
+const excluded=new Set(['.git','node_modules','bin','obj','artifacts','.packages','dist','site','test-results','playwright-report','coverage','__pycache__']);
+const textExtensions=new Set(['.js','.mjs','.json','.md','.html','.css','.yml','.yaml','.py','.ps1','.sh','.txt','.svg','.cs','.csproj','.sln','.props','.targets','.config','.axaml','.manifest','.ts','.xml']);
 const rootFiles=new Set(['LICENSE','.gitignore','.gitattributes','.nojekyll','.node-version']);
 export async function audit({root=resolve(fileURLToPath(new URL('../',import.meta.url))),history=true,policy=null}={}){
  const config=policy||JSON.parse(await readFile(new URL('audit-policy.json',import.meta.url),'utf8'));
@@ -38,7 +38,7 @@ export async function audit({root=resolve(fileURLToPath(new URL('../',import.met
  const reported=new Set();const check=(text,label)=>{for(const id of findMatches(text,rules)){const key=label+'|'+id;if(!reported.has(key)){reported.add(key);issues.push({object:label,rule:id});}}};
  const bytes=(buffer,label)=>{const digest=createHash('sha256').update(buffer).digest('hex');if(seen.has(digest))return;seen.add(digest);check(buffer.toString('utf8'),label);check(buffer.toString('utf16le'),label);if(buffer.length>1){const reversed=Buffer.from(buffer.subarray(0,buffer.length-buffer.length%2));reversed.swap16();check(reversed.toString('utf16le'),label);}};
  async function walk(dir){for(const entry of await readdir(dir,{withFileTypes:true})){if(excluded.has(entry.name))continue;const file=resolve(dir,entry.name),name=relative(root,file).replaceAll('\\','/');if(entry.name.startsWith('.env')){issues.push({object:name,rule:'private-configuration'});continue;}check(name,'path:'+name);if(entry.isSymbolicLink()){issues.push({object:name,rule:'symlink'});continue;}if(entry.isDirectory())await walk(file);else if(entry.isFile()){
-   if(!textExtensions.has(extname(entry.name))&&!rootFiles.has(entry.name))issues.push({object:name,rule:'unreviewed-file-type'});
+   if(!textExtensions.has(extname(entry.name).toLowerCase())&&!rootFiles.has(entry.name))issues.push({object:name,rule:'unreviewed-file-type'});
    const stat=await lstat(file);if(stat.size>8*1024*1024){issues.push({object:name,rule:'oversized-source'});continue;}report.workingFiles++;bytes(await readFile(file),name);
   }} }
  await walk(root);

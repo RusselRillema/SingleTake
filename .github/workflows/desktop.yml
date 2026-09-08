@@ -1,0 +1,113 @@
+name: Build SingleTake native desktop
+
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/**', 'src/**', 'tests/**', 'tools/**', 'SingleTake.sln', 'global.json', 'NuGet.Config', '.github/workflows/desktop.yml']
+  pull_request:
+    branches: [main]
+    paths: ['desktop/**', 'src/**', 'tests/**', 'tools/**', 'SingleTake.sln', 'global.json', 'NuGet.Config', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+    inputs:
+      native_smoke:
+        description: Run the real native window and framebuffer smoke test on each runner
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared:
+    name: Shared JavaScript and history checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: npm run verify
+      - run: npm run desktop:bundle
+
+  desktop:
+    name: Native preview / ${{ matrix.rid }}
+    needs: shared
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-15
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Confirm the runner architecture matches its native package
+        shell: pwsh
+        run: |
+          $rid = '${{ matrix.rid }}'
+          $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+          if (!$rid.EndsWith('-' + $arch)) { throw "Runner architecture $arch does not match $rid" }
+      - name: Generate a JS scene and execute C# protocol tests
+        shell: pwsh
+        run: |
+          node tools/desktop-test-scene.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project desktop/SingleTake.Protocol.Tests -c Release -- artifacts/protocol-scene.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify configured package publication before restore
+        run: node tools/desktop-doctor.mjs --online --rid=${{ matrix.rid }}
+      - name: Restore and build the native host from NuGet only
+        shell: pwsh
+        run: |
+          dotnet restore desktop/SingleTake.Desktop/SingleTake.Desktop.csproj -r '${{ matrix.rid }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build desktop/SingleTake.Desktop/SingleTake.Desktop.csproj -c Release -r '${{ matrix.rid }}' --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish self-contained preview and verify runtime assets
+        shell: pwsh
+        run: |
+          dotnet publish desktop/SingleTake.Desktop/SingleTake.Desktop.csproj -c Release -r '${{ matrix.rid }}' --self-contained true --no-restore -o 'artifacts/desktop/${{ matrix.rid }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/desktop-package.mjs 'artifacts/desktop/${{ matrix.rid }}' '${{ matrix.rid }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Linux display dependencies for optional native smoke
+        if: inputs.native_smoke && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dri libegl1 libx11-6 libxrandr2 libxi6 libxcursor1 libice6 libsm6 libfontconfig1
+      - name: Real native Linux smoke with framebuffer readback
+        if: inputs.native_smoke && runner.os == 'Linux'
+        timeout-minutes: 3
+        run: xvfb-run -a dotnet artifacts/desktop/linux-x64/SingleTake.Desktop.dll --native-smoke
+      - name: Real native window smoke on Windows or macOS
+        if: inputs.native_smoke && runner.os != 'Linux'
+        timeout-minutes: 3
+        run: dotnet artifacts/desktop/${{ matrix.rid }}/SingleTake.Desktop.dll --native-smoke
+      - name: Upload unsigned native preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: SingleTake-native-preview-${{ matrix.rid }}
+          path: artifacts/desktop/${{ matrix.rid }}
+          if-no-files-found: error
+          retention-days: 14

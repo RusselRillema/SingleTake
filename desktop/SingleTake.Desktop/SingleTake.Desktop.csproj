@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SingleTake.Protocol/SingleTake.Protocol.csproj" />
+    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Skia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Silk.NET.OpenGL" Version="$(SilkVersion)" />
+    <PackageReference Include="WebScene.Sdk.Avalonia" Version="$(WebSceneVersion)" />
+    <PackageReference Include="WebScene.NativeEngine.Runtime.win-x64" Version="$(WebSceneVersion)" Condition="'$(RuntimeIdentifier)' == 'win-x64'" />
+    <PackageReference Include="WebScene.NativeEngine.Runtime.linux-x64" Version="$(WebSceneVersion)" Condition="'$(RuntimeIdentifier)' == 'linux-x64'" />
+    <PackageReference Include="WebScene.NativeEngine.Runtime.osx-arm64" Version="$(WebSceneVersion)" Condition="'$(RuntimeIdentifier)' == 'osx-arm64'" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Components/Modeler/main.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Components/Modeler/webscene-component.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../desktop/THIRD_PARTY_NOTICES.md" Link="LICENSES/SingleTake.Desktop.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="ValidateNativeTarget" BeforeTargets="PrepareForBuild;Restore">
+    <Error Condition="'$(RuntimeIdentifier)' != 'win-x64' and '$(RuntimeIdentifier)' != 'linux-x64' and '$(RuntimeIdentifier)' != 'osx-arm64'" Text="The packaged native runtime supports only win-x64, linux-x64 and osx-arm64. Select one matching host RID." />
+  </Target>
+  <Target Name="BundleSharedModeler" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../.." Command="node tools/desktop-bundle.mjs" />
+  </Target>
+  <Target Name="VerifyNativePublish" AfterTargets="Publish">
+    <Error Condition="!Exists('$(PublishDir)webscene-native-runtime.json')" Text="Native runtime metadata was not copied. Verify the selected package and RID." />
+    <Error Condition="!Exists('$(PublishDir)icudtl.dat')" Text="Native ICU data is missing." />
+    <Error Condition="!Exists('$(PublishDir)webscene_bootstrap_snapshot.bin')" Text="Native V8 snapshot is missing." />
+  </Target>
+</Project>

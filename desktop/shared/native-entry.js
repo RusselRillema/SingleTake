@@ -1,0 +1,8 @@
+import './primitives.js';
+import {NativeApp,installPanel} from './native-app.js';
+import {box} from '../../src/geometry/mesh.js';
+let app=null,style=null;let pending=[],draining=false;
+function enqueue(events){if(!Array.isArray(events)||events.length>512)throw Error('Invalid input batch.');for(const e of events){const last=pending.at(-1);if(last&&['move','resize'].includes(e.kind)&&last.kind===e.kind)pending[pending.length-1]=e;else pending.push(e);}if(pending.length>512){pending=[{kind:'blur'}];throw Error('Native JS input backlog was reset.');}if(!draining){draining=true;setTimeout(async()=>{try{while(pending.length&&app){const batch=pending;pending=[];await app.receive(batch);}}catch(e){app?.toast(e.message);}finally{draining=false;}},0);}return true;}
+
+globalThis.mount=async()=>{if(app)await globalThis.unmount();style=installPanel();if(!globalThis.webscene?.host?.commands?.invoke)throw Error('Native command capability is unavailable.');const invoke=(method,args)=>webscene.host.commands.invoke(method,args);app=new NativeApp(invoke);globalThis.SingleTakeDesktop={enqueue,startSmoke:()=>{app.doc.transaction('Native acceptance',p=>p.name='Native acceptance');app.addGeometry(box(2,2,2));app.fit();return true;},receive:events=>app.receive(events),isDirty:()=>app.doc.dirty,diagnostics:()=>({version:1,documentRevision:app.doc.revision,objects:app.doc.project.nodes.length,faces:Object.values(app.doc.project.meshes).reduce((n,m)=>n+m.faces.length,0),renderer:'native-opengl',browser:false})};await invoke('ready',{});};
+globalThis.unmount=async()=>{const old=app;app=null;pending=[];if(old)await old.dispose();globalThis.SingleTakeDesktop=undefined;style?.remove();style=null;document.body.innerHTML='';};

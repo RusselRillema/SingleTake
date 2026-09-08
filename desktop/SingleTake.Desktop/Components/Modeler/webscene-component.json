@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "id": "com.singletake.modeler",
+  "displayName": "SingleTake native modeler",
+  "version": "0.3.0",
+  "profileVersion": "1.0",
+  "entryPoint": "main.js",
+  "assets": [
+    "main.js"
+  ],
+  "capabilities": [
+    "dom",
+    "css.layout",
+    "input.pointer",
+    "input.keyboard",
+    "input.focus",
+    "svg",
+    "host.commands"
+  ],
+  "lifecycle": {
+    "mountExport": "mount",
+    "unmountExport": "unmount"
+  }
+}

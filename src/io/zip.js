@@ -1,4 +1,7 @@
 const decoder=new TextDecoder();
+let nativeInflater=null;
+/** Native hosts supply bounded raw DEFLATE without emulating a browser stream stack. */
+export function setNativeInflater(inflate){if(inflate!==null&&typeof inflate!=='function')throw Error('Inflater must be a function or null.');nativeInflater=inflate;}
 const CRC_TABLE=Uint32Array.from({length:256},(_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0;});
 export function crc32(bytes){let c=0xffffffff;for(const b of bytes)c=CRC_TABLE[(c^b)&255]^(c>>>8);return (c^0xffffffff)>>>0;}
 /** Reads ordinary and prepended-header ZIP archives. ZIP64 and encrypted entries fail explicitly. */
@@ -22,6 +25,10 @@ export async function unzip(input,{maxBytes=512*1024*1024,maxEntries=20000,onPro
   if(begin+packed>bytes.length)throw Error('Truncated ZIP payload.');
   const compressed=bytes.subarray(begin,begin+packed);let data;
   if(method===0)data=compressed.slice();
+  else if(method===8&&nativeInflater){
+   data=await nativeInflater(compressed,raw);
+   if(!(data instanceof Uint8Array)||data.length!==raw||data.length>maxBytes)throw Error('Native inflation returned an invalid size.');
+  }
   else if(method===8){
    const stream=new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
    // Bound the actual decompressed bytes too, not only untrusted ZIP metadata.

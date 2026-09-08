@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SingleTake.Desktop", "desktop\SingleTake.Desktop\SingleTake.Desktop.csproj", "{36DCF1C3-A15B-5843-A607-0C2B4E9508A1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SingleTake.Protocol", "desktop\SingleTake.Protocol\SingleTake.Protocol.csproj", "{737DD5F1-4646-5623-AFFD-AB0D00E3CFBF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SingleTake.Protocol.Tests", "desktop\SingleTake.Protocol.Tests\SingleTake.Protocol.Tests.csproj", "{AF8D3823-2DCB-554B-9436-34DADDCEAFFB}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{36DCF1C3-A15B-5843-A607-0C2B4E9508A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{36DCF1C3-A15B-5843-A607-0C2B4E9508A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{36DCF1C3-A15B-5843-A607-0C2B4E9508A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{36DCF1C3-A15B-5843-A607-0C2B4E9508A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{737DD5F1-4646-5623-AFFD-AB0D00E3CFBF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{737DD5F1-4646-5623-AFFD-AB0D00E3CFBF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{737DD5F1-4646-5623-AFFD-AB0D00E3CFBF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{737DD5F1-4646-5623-AFFD-AB0D00E3CFBF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AF8D3823-2DCB-554B-9436-34DADDCEAFFB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AF8D3823-2DCB-554B-9436-34DADDCEAFFB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AF8D3823-2DCB-554B-9436-34DADDCEAFFB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AF8D3823-2DCB-554B-9436-34DADDCEAFFB}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

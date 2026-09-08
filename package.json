@@ -13,7 +13,9 @@
     "build": "node tools/build.mjs",
     "verify": "node tools/verify.mjs",
     "publish": "node tools/publish.mjs",
-    "preview": "node server.mjs --dist"
+    "preview": "node server.mjs --dist",
+    "desktop:bundle": "node tools/desktop-bundle.mjs",
+    "desktop:doctor": "node tools/desktop-doctor.mjs"
   },
   "engines": {
     "node": ">=22"

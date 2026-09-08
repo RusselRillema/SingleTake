@@ -1,8 +1,14 @@
 # SingleTake
 
-A local-first 3D modeling workspace built with plain HTML, CSS and JavaScript modules, using a custom native WebGPU renderer. No UI framework, external rendering engine, runtime CDN, required npm dependency or server-side model converter is bundled.
+A local-first 3D modeling workspace with a plain HTML/CSS/JavaScript web target and a package-based C#/Avalonia native desktop preview sharing the modeling core. The web target uses a custom WebGPU renderer without a UI framework or runtime CDN.
 
-## Run
+## Native desktop preview
+
+Open `SingleTake.sln` in Rider. The new desktop project uses a WebScene native component host through NuGet and a native OpenGL/GLES viewport, not a browser wrapping control. The JS modeling kernel is shared; the C# host handles platform services and native presentation.
+
+**Native package publication/restore, C# compilation and native GPU execution remain unverified in this delivery.** The pinned WebScene source version is not proof that matching packages have been published. The desktop preview is not native rendering parity or AOT compilation of JS/HTML. See [Native desktop setup and boundaries](docs/NATIVE-DESKTOP.md) before building. The existing web target and Pages workflow remain separate.
+
+## Run the web target
 
 Use Node.js 22 or newer:
 
@@ -39,10 +45,10 @@ npm run audit
 npm run build
 ```
 
-CPU tests do not require a GPU. Four optional private-model regressions require `SINGLETAKE_MODEL_FIXTURE` to point outside the repository. Optional browser tests separately distinguish DOM/controller behavior from real WebGPU execution. No private model fixture, external manual, extracted texture or font is distributed.
+CPU tests do not require a GPU. Five optional private-model regressions require `SINGLETAKE_MODEL_FIXTURE` to point outside the repository. Optional browser tests separately distinguish DOM/controller behavior from real WebGPU execution. No private model fixture, external manual, extracted texture or font is distributed.
 
 This is a development build, not a claim of complete commercial CAD parity or a measured performance guarantee. Actual GPU acceptance remains necessary on target devices.
 
 [Deployment](docs/DEPLOYMENT.md) · [Controls](docs/CONTROLS.md) · [Architecture](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Testing](docs/TESTING.md) · [Naming audit](docs/NAMING-AUDIT.md)
 
-MIT licensed. Independent research attribution is retained in `THIRD_PARTY_NOTICES.md`. Review model and texture redistribution rights before publishing assets.
+SingleTake source is MIT licensed. Desktop dependencies retain their own terms, including WebScene's custom Restricted Party Clause; see `desktop/THIRD_PARTY_NOTICES.md`. Independent research attribution is retained in `THIRD_PARTY_NOTICES.md`. Review model and texture redistribution rights before publishing assets.
