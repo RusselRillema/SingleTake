@@ -13,9 +13,10 @@ public sealed record SavedFile(bool Saved,string? Name=null);
 public static class NativeFiles
 {
     public const int MaximumFileBytes=128*1024*1024;
-    public static async Task<PickedFiles> OpenAsync(Window owner,CancellationToken ct)
+    public static async Task<PickedFiles> OpenAsync(Window owner,CancellationToken ct,string kind="model")
     {
-        var files=await UiThread.Run(()=>owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions{Title="Open model and companion assets",AllowMultiple=true,FileTypeFilter=[new FilePickerFileType("Model and companion files"){Patterns=["*.take","*.skp","*.glb","*.gltf","*.bin","*.obj","*.mtl","*.stl","*.ply","*.dxf","*.png","*.jpg","*.jpeg","*.webp"]}]}));
+        if(kind is not ("model" or "image"))throw new InvalidDataException("Invalid picker kind.");
+        var files=await UiThread.Run(()=>owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions{Title="Open model and companion assets",AllowMultiple=kind=="model",FileTypeFilter=[new FilePickerFileType(kind=="image"?"Image":"Model and companion files"){Patterns=kind=="image"?["*.png","*.jpg","*.jpeg","*.webp"]:["*.take","*.skp","*.glb","*.gltf","*.bin","*.obj","*.mtl","*.stl","*.ply","*.dxf","*.png","*.jpg","*.jpeg","*.webp"]}]}));
         if(files.Count>128)throw new InvalidDataException("Select at most 128 model and companion files.");
         var result=new List<PickedFile>();long total=0;
         try

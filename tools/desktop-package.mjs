@@ -2,13 +2,15 @@
 import {readdir,readFile,writeFile,mkdir,lstat,copyFile,access} from 'node:fs/promises';
 import {resolve,relative,basename,join} from 'node:path';
 import {createHash} from 'node:crypto';
+import {verifyDesktopUI} from './desktop-bundle.mjs';
 const [folder,rid]=process.argv.slice(2);
 const modules={'win-x64':'webscene_native_engine.dll','linux-x64':'libwebscene_native_engine.so','osx-arm64':'libwebscene_native_engine.dylib'};
 try{
  if(!folder||!modules[rid])throw Error('Usage: node tools/desktop-package.mjs PUBLISH_DIRECTORY win-x64|linux-x64|osx-arm64');
  const out=resolve(folder);
  if(!/[/\\]artifacts[/\\]desktop[/\\]/.test(out))throw Error('Package inventory must target artifacts/desktop/<rid>.');
- for(const file of ['SingleTake.Desktop.dll',modules[rid],'icudtl.dat','webscene_bootstrap_snapshot.bin','webscene_bootstrap_snapshot.meta','webscene-native-runtime.json','Components/Modeler/main.js','Components/Modeler/webscene-component.json'])await access(join(out,file));
+ for(const file of ['SingleTake.Desktop.dll',modules[rid],'icudtl.dat','webscene_bootstrap_snapshot.bin','webscene_bootstrap_snapshot.meta','webscene-native-runtime.json','Components/Modeler/main.js','Components/Modeler/webscene-component.json','Components/Modeler/ui/index.html','Components/Modeler/ui/style.css','Components/Modeler/ui-source.json'])await access(join(out,file));
+ await verifyDesktopUI(join(out,'Components/Modeler'));
  // NuGet metadata remains authoritative. Copy present license files without deleting any original runtime asset.
  const assets=JSON.parse(await readFile('desktop/SingleTake.Desktop/obj/project.assets.json','utf8'));
  const packageRoots=Object.keys(assets.packageFolders||{});const packages=[];

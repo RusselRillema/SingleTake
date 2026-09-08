@@ -1,12 +1,15 @@
 {
   "schemaVersion": "1.0",
   "id": "com.singletake.modeler",
-  "displayName": "SingleTake native modeler",
-  "version": "0.3.0",
+  "displayName": "SingleTake shared workspace",
+  "version": "0.4.0",
   "profileVersion": "1.0",
   "entryPoint": "main.js",
   "assets": [
-    "main.js"
+    "main.js",
+    "ui/index.html",
+    "ui/style.css",
+    "ui-source.json"
   ],
   "capabilities": [
     "dom",

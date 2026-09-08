@@ -21,7 +21,8 @@ def load(path):
     if key=='src/app.js':text=text.split('const app=new App();globalThis.singletake=app;')[0]
     modules[key]=text+'\nreturn {'+','.join(names)+'};';order.append(key);return key
 load(ROOT/'src/app.js')
-bundle='const __modules={};\n'+'\n'.join('__modules['+json.dumps(k)+']=(function(){'+modules[k]+'})();' for k in order)+'\nwindow.singletake=new __modules["src/app.js"].App();window.testModules=__modules;'
+load(ROOT/'src/platform/browser.js')
+bundle='const __modules={};\n'+'\n'.join('__modules['+json.dumps(k)+']=(function(){'+modules[k]+'})();' for k in order)+'\nwindow.singletake=new __modules["src/app.js"].App(__modules["src/platform/browser.js"].createBrowserPlatform());window.testModules=__modules;'
 html=(ROOT/'index.html').read_text();html=re.sub(r'<script.*?</script>','',html,flags=re.S);html=re.sub(r'<link[^>]+>','',html);html=html.replace('</head>','<style>'+(ROOT/'style.css').read_text()+'</style></head>')
 results=[];errors=[]
 (ROOT/'test-results').mkdir(exist_ok=True)

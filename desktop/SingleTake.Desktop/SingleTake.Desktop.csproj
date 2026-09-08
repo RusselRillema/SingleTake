@@ -20,6 +20,7 @@
     <PackageReference Include="WebScene.NativeEngine.Runtime.osx-arm64" Version="$(WebSceneVersion)" Condition="'$(RuntimeIdentifier)' == 'osx-arm64'" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Components/Modeler/ui/index.html;Components/Modeler/ui/style.css;Components/Modeler/ui-source.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Components/Modeler/main.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Components/Modeler/webscene-component.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../desktop/THIRD_PARTY_NOTICES.md" Link="LICENSES/SingleTake.Desktop.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

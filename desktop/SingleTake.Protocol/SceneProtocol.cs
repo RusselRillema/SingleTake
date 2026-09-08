@@ -17,6 +17,8 @@ public sealed record SceneFrame
     public float CameraDistance { get; init; }
     public double Width { get; init; }
     public double Height { get; init; }
+    public ViewportRect? Viewport { get; init; }
+    public float Exposure { get; init; } = 1;
     public int Style { get; init; }
     public bool Axes { get; init; }
     public bool Grid { get; init; }
@@ -32,6 +34,7 @@ public sealed record SceneFrame
     public SceneTag[] Tags { get; init; } = [];
     public OverlayPrimitive[] Overlay { get; init; } = [];
 }
+public sealed record ViewportRect(double Left, double Top, double Width, double Height);
 public sealed record MeshPacket(string Id, MeshGroupPacket[] Groups, string Lines, string Wire);
 public sealed record MeshGroupPacket(string Vertices, string Indices, int Material, string? Tag);
 public sealed record ImagePacket(string Id, string Data);
@@ -70,6 +73,11 @@ public sealed class SceneStore
         Id(f.DocumentId); Require(f.Name.Length <= 1024, "Model title too long.");
         Finite(f.ViewProjection, 16); Finite(f.Eye, 3); Finite(f.Origin, 3); Finite(f.Section, 4);
         Require(double.IsFinite(f.Width) && double.IsFinite(f.Height) && f.Width > 0 && f.Height > 0 && f.Width <= 65536 && f.Height <= 65536, "Invalid viewport size.");
+        if (f.Viewport is { } r) {
+            Require(double.IsFinite(r.Left) && double.IsFinite(r.Top) && r.Left >= 0 && r.Top >= 0 && r.Left <= 65536 && r.Top <= 65536, "Invalid DOM viewport offset.");
+            Require(double.IsFinite(r.Width) && double.IsFinite(r.Height) && Math.Abs(r.Width-f.Width)<0.01 && Math.Abs(r.Height-f.Height)<0.01, "DOM and camera sizes disagree.");
+        }
+        Require(float.IsFinite(f.Exposure) && f.Exposure is >= 0.1f and <= 5f, "Invalid exposure.");
         Require(float.IsFinite(f.CameraDistance) && f.CameraDistance > 0 && f.Style is >= 0 and <= 3, "Invalid view parameters.");
         Require(f.Nodes.Length <= 250000 && f.Resources.Length <= 50000 && f.Materials.Length is > 0 and <= 20000 && f.Tags.Length <= 50000, "Scene count exceeds limits.");
         Require(f.Images.Length <= 4096 && f.ImageIds.Length <= 4096 && f.Overlay.Length <= 20000, "Scene decorations exceed limits.");
