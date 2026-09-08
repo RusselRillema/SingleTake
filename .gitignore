@@ -21,3 +21,5 @@ artifacts/
 .idea/
 *.user
 desktop/SingleTake.Desktop/Components/Modeler/main.js
+desktop/SingleTake.Desktop/Components/Modeler/ui/
+desktop/SingleTake.Desktop/Components/Modeler/ui-source.json

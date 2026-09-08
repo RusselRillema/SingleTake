@@ -43,3 +43,16 @@ The test navigates normally, initializes an adapter, creates a solid, exercises 
 The submitted private-model run passed all 77 CPU tests. The normal public run passed 73 and skipped its four private-fixture tests. All 17 DOM/controller checks passed with no page errors. Browser navigation returned `ERR_BLOCKED_BY_ADMINISTRATOR`; actual GPU execution and performance remain unverified. These are development results, not a substitute for target-device acceptance.
 
 See `VALIDATION.json` for machine-readable scope. The naming audit checks a defined fingerprint policy; adding third-party assets or libraries requires a fresh review.
+
+
+## Shared desktop UI regression
+
+The desktop component is built from the canonical root HTML/CSS and `src/app.js`.
+`tests/shared-ui.test.mjs` verifies source identity, removal of the separate UI/input
+controller, native-service behavior and bounded frame transport. After
+`npm run desktop:bundle`, run `python tools/shared-ui-smoke.py` to exercise the actual
+component payload in a Chromium DOM with native OS/GPU services mocked. This checks
+real canvas pointer/keyboard events and the original dialogs and panels at 2x scale;
+it does not verify WebScene or native GPU execution. Reports are in `test-results/`.
+The desktop workflow runs these checks and rebuilds on root HTML/CSS changes.
+See `NATIVE-DESKTOP.md` for the separate real-native acceptance gate.

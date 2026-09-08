@@ -3,10 +3,10 @@ name: Build SingleTake native desktop
 on:
   push:
     branches: [main]
-    paths: ['desktop/**', 'src/**', 'tests/**', 'tools/**', 'SingleTake.sln', 'global.json', 'NuGet.Config', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'src/**', 'tests/**', 'tools/**', 'index.html', 'style.css', 'package.json', 'SingleTake.sln', 'global.json', 'NuGet.Config', '.github/workflows/desktop.yml']
   pull_request:
     branches: [main]
-    paths: ['desktop/**', 'src/**', 'tests/**', 'tools/**', 'SingleTake.sln', 'global.json', 'NuGet.Config', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'src/**', 'tests/**', 'tools/**', 'index.html', 'style.css', 'package.json', 'SingleTake.sln', 'global.json', 'NuGet.Config', '.github/workflows/desktop.yml']
   workflow_dispatch:
     inputs:
       native_smoke:
@@ -37,6 +37,14 @@ jobs:
           package-manager-cache: false
       - run: npm run verify
       - run: npm run desktop:bundle
+      - name: Install DOM-only test runner (not a desktop runtime dependency)
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Exercise the exact packaged UI with native services mocked
+        run: |
+          python tools/shared-ui-smoke.py
+          python tools/ui-smoke.py
 
   desktop:
     name: Native preview / ${{ matrix.rid }}

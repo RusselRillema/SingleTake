@@ -4,9 +4,11 @@ A local-first 3D modeling workspace with a plain HTML/CSS/JavaScript web target 
 
 ## Native desktop preview
 
-Open `SingleTake.sln` in Rider. The new desktop project uses a WebScene native component host through NuGet and a native OpenGL/GLES viewport, not a browser wrapping control. The JS modeling kernel is shared; the C# host handles platform services and native presentation.
+Open `SingleTake.sln` in Rider. The C#/Avalonia target consumes WebScene through NuGet and runs the **same root HTML, CSS, App, controls and interaction code** as the web target. Native code supplies GPU presentation and OS services only. There is no separate desktop sidebar, duplicate command controller, browser control or hosted website.
 
-**Native package publication/restore, C# compilation and native GPU execution remain unverified in this delivery.** The pinned WebScene source version is not proof that matching packages have been published. The desktop preview is not native rendering parity or AOT compilation of JS/HTML. See [Native desktop setup and boundaries](docs/NATIVE-DESKTOP.md) before building. The existing web target and Pages workflow remain separate.
+`npm run desktop:bundle` regenerates the component from the shared sources; normal .NET builds run this automatically. See [Native setup, architecture and test boundaries](docs/NATIVE-DESKTOP.md).
+
+**Native package restore, C# compilation and WebScene/GPU execution remain unverified by this source delivery.** The generated desktop JavaScript is tested in a Chromium DOM with native services mocked, not presented as proof of native UI compatibility. The native renderer remains OpenGL/GLES rather than WebGPU and does not implement all browser rendering features. Pages and native artifacts remain separate.
 
 ## Run the web target
 

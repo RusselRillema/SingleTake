@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.OpenGL;
 using Avalonia.OpenGL.Controls;
 using Avalonia.Threading;
@@ -8,6 +7,7 @@ using Silk.NET.OpenGL;
 using SkiaSharp;
 using SingleTake.Protocol;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using GL = Silk.NET.OpenGL.GL;
 
@@ -21,19 +21,19 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
     readonly HashSet<string> translucentTextures=[];
     readonly Dictionary<string,uint> textures=new(StringComparer.Ordinal);
     readonly Dictionary<string,int> uniforms=new(StringComparer.Ordinal);
-    readonly HashSet<string> heldKeys=[];
     GL? gl;
     uint program,instances,lineVao,lineVbo;
     SceneSnapshot? snapshot;
     long residentSerial;
-    bool failed,releasingCapture;
-    public event Action<NativeInput>? Input;
+    bool failed;
+    TaskCompletionSource<byte[]>? screenshot;
+    public event Action? Reset;
     public event Action<string>? Failed;
-    public sealed record FrameEvidence(long Serial, int Placements, int DrawCalls, int ChangedPixels, string Diagnostics);
+    public sealed record FrameEvidence(long Serial, int Placements, int DrawCalls, int ChangedPixels, string Diagnostics, long Triangles, double CpuMs);
     public event Action<FrameEvidence>? Presented;
     // Readback is opt-in for acceptance tests, never part of the interactive frame path.
     public bool CaptureAcceptancePixels { get; set; }
-    public NativeViewport(){Focusable=true;ClipToBounds=true;}
+    public NativeViewport(){Focusable=false;IsHitTestVisible=false;ClipToBounds=true;}
     public void SetScene(SceneSnapshot scene){Volatile.Write(ref snapshot,scene);RequestNextFrameRendering();}
     protected override void OnOpenGlInit(GlInterface api)
     {
@@ -43,7 +43,7 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
             var prefix=GlVersion.Type==GlProfileType.OpenGLES?"#version 300 es\nprecision highp float;\n":"#version 150\n";
             var vertex=GlVersion.Type==GlProfileType.OpenGLES?VertexShader:Regex.Replace(VertexShader,@"layout\(location=\d+\)\s*", "");
             program=Compile(prefix+vertex,prefix+FragmentShader);instances=gl.GenBuffer();lineVao=gl.GenVertexArray();lineVbo=gl.GenBuffer();failed=false;residentSerial=0;
-            Dispatcher.UIThread.Post(()=>Input?.Invoke(new NativeInput{Kind="reset"}));
+            Dispatcher.UIThread.Post(()=>Reset?.Invoke());
         }
         catch(Exception ex){ReportFailure("Native GPU initialization failed: "+ex.Message);}
     }
@@ -61,7 +61,7 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
             if(scene is null)return;
             var watch=System.Diagnostics.Stopwatch.StartNew();Synchronize(scene);
             gl.UseProgram(program);Matrix("vp",scene.Frame.ViewProjection);Vec3("eye",scene.Frame.Eye);Vec4("sectionPlane",scene.Frame.Section);
-            gl.Uniform1(U("style"),scene.Frame.Style);gl.Uniform1(U("tex"),0);
+            gl.Uniform1(U("exposure"),scene.Frame.Exposure);gl.Uniform1(U("style"),scene.Frame.Style);gl.Uniform1(U("tex"),0);
             var frame=scene.Frame;
             if(frame.Grid||frame.Axes)DrawWorld(frame);
             var tags=frame.Tags.ToDictionary(t=>t.Id,t=>t,StringComparer.Ordinal);
@@ -81,14 +81,14 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
             var calls=0;
             // Opaque faces are batched by shared resource/material; transparent placements sort back-to-front.
             gl.Disable(EnableCap.Blend);gl.DepthMask(true);
-            if(frame.Style!=1){foreach(var batch in opaque){DrawBatch(batch,frame);calls++;}}
-            if(frame.Edges||frame.Style==1)
+            if(frame.Style!=2){foreach(var batch in opaque){DrawBatch(batch,frame);calls++;}}
+            if(frame.Edges||frame.Style==2)
             {
                 gl.Uniform1(U("unlit"),1);gl.Uniform1(U("hasTexture"),0);gl.Uniform1(U("selected"),0);gl.Uniform1(U("dimmed"),0);gl.Uniform1(U("linePass"),1);
                 gl.Enable(EnableCap.Blend);gl.BlendFunc(BlendingFactor.SrcAlpha,BlendingFactor.OneMinusSrcAlpha);gl.DepthMask(false);
                 foreach(var bucket in frame.Nodes.GroupBy(n=>new{n.Mesh,n.Selected,n.Dimmed}))
                 {
-                    var resource=meshes[bucket.Key.Mesh];var line=frame.Style==1?resource.Wire:resource.Lines;if(line.Count==0)continue;
+                    var resource=meshes[bucket.Key.Mesh];var line=frame.Style==2?resource.Wire:resource.Lines;if(line.Count==0)continue;
                     Vec4("color",bucket.Key.Selected?[.96f,.61f,.18f,1]:[.12f,.20f,.16f,bucket.Key.Dimmed ? .3f : .8f]);
                     DrawPart(line,bucket.ToArray(),PrimitiveType.Lines);calls++;
                 }
@@ -99,7 +99,7 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
                     gl.Enable(EnableCap.DepthTest);
                 }
             }
-            if(frame.Style!=1&&transparent.Count>0)
+            if(frame.Style!=2&&transparent.Count>0)
             {
                 gl.Enable(EnableCap.Blend);gl.BlendFunc(BlendingFactor.SrcAlpha,BlendingFactor.OneMinusSrcAlpha);gl.DepthMask(false);
                 foreach(var batch in transparent.OrderByDescending(b=>Distance(b.Nodes[0].Matrix,frame.Eye))){DrawBatch(batch,frame);calls++;}
@@ -117,10 +117,33 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
                 for(var i=0;i<pixels.Length;i+=4)if(Math.Abs(pixels[i]-217)+Math.Abs(pixels[i+1]-224)+Math.Abs(pixels[i+2]-217)>25)changedPixels++;
             }
             watch.Stop();var info=$"Native GL · {frame.Nodes.Length:N0} placements · {calls:N0} draws · submission {watch.Elapsed.TotalMilliseconds:F1} ms";
-            var evidence=new FrameEvidence(frame.Serial,frame.Nodes.Length,calls,changedPixels,info);
+            var triangles=frame.Style==2?0L:opaque.Concat(transparent).Sum(b=>(long)b.Part.Count/3*b.Nodes.Length);
+            var evidence=new FrameEvidence(frame.Serial,frame.Nodes.Length,calls,changedPixels,info,triangles,watch.Elapsed.TotalMilliseconds);
+            var capture=Interlocked.Exchange(ref screenshot,null);
+            if(capture is not null){try{capture.TrySetResult(CapturePng((int)Math.Max(1,Bounds.Width*scale),(int)Math.Max(1,Bounds.Height*scale)));}catch(Exception ex){capture.TrySetException(ex);}}
             Dispatcher.UIThread.Post(()=>Presented?.Invoke(evidence));
         }
         catch(Exception ex){ReportFailure("Native GPU rendering failed: "+ex.Message);}
+    }
+    public Task<byte[]> RequestScreenshotAsync()
+    {
+        if (failed || gl is null || snapshot is null) throw new InvalidOperationException("The native renderer is not ready.");
+        var request = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (Interlocked.CompareExchange(ref screenshot, request, null) is not null)
+            throw new InvalidOperationException("A viewport capture is already pending.");
+        RequestNextFrameRendering(); return request.Task;
+    }
+    byte[] CapturePng(int width, int height)
+    {
+        if (width > 8192 || height > 8192 || (long)width*height > 32*1024*1024)
+            throw new InvalidOperationException("Viewport capture exceeds its pixel limit.");
+        var bytes = new byte[checked(width*height*4)];
+        fixed (byte* target = bytes) gl!.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, target);
+        if (gl!.GetError() != GLEnum.NoError) throw new InvalidOperationException("Native viewport readback failed.");
+        using var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        for (var row=0; row<height; row++) Marshal.Copy(bytes, (height-1-row)*width*4, bitmap.GetPixels()+row*bitmap.RowBytes, width*4);
+        using var image = SKImage.FromBitmap(bitmap); using var png = image.Encode(SKEncodedImageFormat.Png, 100);
+        return png.ToArray();
     }
     void Synchronize(SceneSnapshot scene)
     {
@@ -213,22 +236,10 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
     static float Distance(float[] m,float[] eye)=>(m[12]-eye[0])*(m[12]-eye[0])+(m[13]-eye[1])*(m[13]-eye[1])+(m[14]-eye[2])*(m[14]-eye[2]);
     void Delete(GpuMesh m){foreach(var part in m.Groups)Delete(part);Delete(m.Lines);Delete(m.Wire);}
     void Delete(GpuPart p){var g=gl!;if(p.Ebo!=0)g.DeleteBuffer(p.Ebo);g.DeleteBuffer(p.Vbo);g.DeleteVertexArray(p.Vao);}
-    protected override void OnOpenGlDeinit(GlInterface api){if(gl is null)return;foreach(var mesh in meshes.Values)Delete(mesh);meshes.Clear();foreach(var t in textures.Values)gl.DeleteTexture(t);textures.Clear();texturePixels.Clear();translucentTextures.Clear();if(program!=0)gl.DeleteProgram(program);if(instances!=0)gl.DeleteBuffer(instances);if(lineVbo!=0)gl.DeleteBuffer(lineVbo);if(lineVao!=0)gl.DeleteVertexArray(lineVao);uniforms.Clear();gl.Dispose();gl=null;}
-    protected override void OnOpenGlLost(){meshes.Clear();textures.Clear();texturePixels.Clear();translucentTextures.Clear();uniforms.Clear();residentSerial=0;gl?.Dispose();gl=null;Dispatcher.UIThread.Post(()=>Input?.Invoke(new NativeInput{Kind="reset"}));}
-    void ReportFailure(string text){failed=true;Dispatcher.UIThread.Post(()=>Failed?.Invoke(text));}
+    protected override void OnOpenGlDeinit(GlInterface api){Interlocked.Exchange(ref screenshot,null)?.TrySetCanceled();if(gl is null)return;foreach(var mesh in meshes.Values)Delete(mesh);meshes.Clear();foreach(var t in textures.Values)gl.DeleteTexture(t);textures.Clear();texturePixels.Clear();translucentTextures.Clear();if(program!=0)gl.DeleteProgram(program);if(instances!=0)gl.DeleteBuffer(instances);if(lineVbo!=0)gl.DeleteBuffer(lineVbo);if(lineVao!=0)gl.DeleteVertexArray(lineVao);uniforms.Clear();gl.Dispose();gl=null;}
+    protected override void OnOpenGlLost(){Interlocked.Exchange(ref screenshot,null)?.TrySetException(new InvalidOperationException("The native GPU context was lost."));meshes.Clear();textures.Clear();texturePixels.Clear();translucentTextures.Clear();uniforms.Clear();residentSerial=0;gl?.Dispose();gl=null;Dispatcher.UIThread.Post(()=>Reset?.Invoke());}
+    void ReportFailure(string text){failed=true;Interlocked.Exchange(ref screenshot,null)?.TrySetException(new InvalidOperationException(text));Dispatcher.UIThread.Post(()=>Failed?.Invoke(text));}
 
-    NativeInput Pointer(string kind,PointerEventArgs e,int button=0){var p=e.GetPosition(this);var props=e.GetCurrentPoint(this).Properties;return Modifiers(new NativeInput{Kind=kind,X=p.X,Y=p.Y,Button=button,Buttons=(props.IsLeftButtonPressed?1:0)|(props.IsRightButtonPressed?2:0)|(props.IsMiddleButtonPressed?4:0)},e.KeyModifiers);}
-    static NativeInput Modifiers(NativeInput input,KeyModifiers m)=>input with{ShiftKey=m.HasFlag(KeyModifiers.Shift),CtrlKey=m.HasFlag(KeyModifiers.Control),AltKey=m.HasFlag(KeyModifiers.Alt),MetaKey=m.HasFlag(KeyModifiers.Meta)};
-    protected override void OnPointerPressed(PointerPressedEventArgs e){base.OnPointerPressed(e);Focus();e.Pointer.Capture(this);var props=e.GetCurrentPoint(this).Properties;var b=props.PointerUpdateKind==PointerUpdateKind.MiddleButtonPressed?1:props.PointerUpdateKind==PointerUpdateKind.RightButtonPressed?2:0;Input?.Invoke(Pointer("down",e,b));e.Handled=true;}
-    protected override void OnPointerMoved(PointerEventArgs e){base.OnPointerMoved(e);Input?.Invoke(Pointer("move",e));e.Handled=true;}
-    protected override void OnPointerReleased(PointerReleasedEventArgs e){base.OnPointerReleased(e);var b=e.InitialPressMouseButton==MouseButton.Middle?1:e.InitialPressMouseButton==MouseButton.Right?2:0;Input?.Invoke(Pointer("up",e,b));if(!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed&&!e.GetCurrentPoint(this).Properties.IsMiddleButtonPressed&&!e.GetCurrentPoint(this).Properties.IsRightButtonPressed){releasingCapture=true;try{e.Pointer.Capture(null);}finally{releasingCapture=false;}}e.Handled=true;}
-    protected override void OnPointerWheelChanged(PointerWheelEventArgs e){base.OnPointerWheelChanged(e);Input?.Invoke(Pointer("wheel",e) with{DeltaY=-e.Delta.Y*100});e.Handled=true;}
-    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e){base.OnPointerCaptureLost(e);if(!releasingCapture)Input?.Invoke(new NativeInput{Kind="blur"});}
-    protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);var key=KeyName(e);var repeat=!heldKeys.Add(key);Input?.Invoke(Modifiers(new NativeInput{Kind="keyDown",Key=key,Repeat=repeat},e.KeyModifiers));e.Handled=true;}
-    protected override void OnKeyUp(KeyEventArgs e){base.OnKeyUp(e);var key=KeyName(e);heldKeys.Remove(key);Input?.Invoke(Modifiers(new NativeInput{Kind="keyUp",Key=key},e.KeyModifiers));e.Handled=true;}
-    protected override void OnLostFocus(Avalonia.Interactivity.RoutedEventArgs e){base.OnLostFocus(e);heldKeys.Clear();Input?.Invoke(new NativeInput{Kind="blur"});}
-    static string KeyName(KeyEventArgs e)=>e.Key switch{Key.Space=>" ",Key.Left=>"ArrowLeft",Key.Right=>"ArrowRight",Key.Up=>"ArrowUp",Key.Down=>"ArrowDown",Key.LeftShift or Key.RightShift=>"Shift",Key.LeftCtrl or Key.RightCtrl=>"Control",Key.LeftAlt or Key.RightAlt=>"Alt",Key.LWin or Key.RWin=>"Meta",Key.Return=>"Enter",Key.Back=>"Backspace",Key.OemMinus or Key.Subtract=>"-",Key.OemPeriod or Key.Decimal=>".",_=>e.KeySymbol??(e.Key.ToString().StartsWith("D",StringComparison.Ordinal)&&e.Key.ToString().Length==2?e.Key.ToString()[1..]:e.Key.ToString())};
-    protected override void OnSizeChanged(SizeChangedEventArgs e){base.OnSizeChanged(e);Input?.Invoke(new NativeInput{Kind="resize",Width=Math.Max(1,Bounds.Width),Height=Math.Max(1,Bounds.Height)});}
     sealed record GpuPart(uint Vao,uint Vbo,uint Ebo,uint Count,int Material,string? Tag);
     sealed record GpuMesh(GpuPart[] Groups,GpuPart Lines,GpuPart Wire);
     sealed record Batch(GpuPart Part,SceneNode[] Nodes,SceneMaterial Material,float[] Color,bool Selected,bool Dimmed);
@@ -252,6 +263,7 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
     uniform vec3 eye;
     uniform vec4 color;
     uniform vec4 sectionPlane;
+    uniform float exposure;
     uniform float roughness;
     uniform float metalness;
     uniform sampler2D tex;
@@ -270,7 +282,7 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
       if(base.a<0.015)discard;
       vec3 outputColor=base.rgb;
       if(unlit==0){
-        if(style==2)base.rgb=vec3(0.79,0.80,0.75);
+        if(style==1)base.rgb=vec3(0.79,0.80,0.75);
         vec3 n=normalize(worldNormal)*(gl_FrontFacing?1.0:-1.0),v=normalize(eye-worldPosition),l=normalize(vec3(0.45,0.85,0.38)),h=normalize(l+v);
         float nl=max(dot(n,l),0.0),nv=max(dot(n,v),0.001),nh=max(dot(n,h),0.0),vh=max(dot(v,h),0.0);
         float r=max(roughness,0.06),a=r*r,a2=a*a,d=a2/(PI*pow(nh*nh*(a2-1.0)+1.0,2.0));
@@ -278,7 +290,7 @@ public sealed unsafe class NativeViewport : OpenGlControlBase
         vec3 albedo=pow(max(base.rgb,vec3(0.0)),vec3(2.2)),f0=mix(vec3(0.04),albedo,metalness),f=f0+(1.0-f0)*pow(1.0-vh,5.0);
         vec3 diffuse=(1.0-f)*(1.0-metalness)*albedo/PI,specular=d*g*f/max(4.0*nv*nl,0.001);
         vec3 linear=albedo*(0.28+0.15*max(n.y,0.0))+(diffuse+specular)*nl*2.2;
-        outputColor=pow(linear/(linear+vec3(0.35)),vec3(1.0/2.2));
+        linear*=exposure;outputColor=pow(linear/(linear+vec3(0.35)),vec3(1.0/2.2));
         if(style==3)base.a*=0.28;
         if(selected==1)outputColor=mix(outputColor,vec3(1.0,0.66,0.24),0.35);
         if(dimmed==1)outputColor=mix(outputColor,vec3(0.85,0.88,0.85),0.65);

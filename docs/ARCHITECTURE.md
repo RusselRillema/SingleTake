@@ -35,3 +35,14 @@ GLB retains shared meshes; formats without hierarchy flatten visible placements.
 ## Validation boundaries
 
 CPU tests check geometry, document transactions, transforms, selection, snapping, tags, components and exchange round-trips. DOM tests run actual controllers without initializing WebGPU. The separate real-browser test reports NOT_RUN when a GPU is unavailable or navigation is policy-blocked. CPU/DOM passes do not establish rendered correctness or performance.
+
+
+## Shared web/native application shell
+
+`src/app.js` is the single controller; `src/main.js` is only the browser bootstrap.
+`src/platform/browser.js` and `desktop/shared/native-platform.js` provide renderer,
+I/O and recovery services. Desktop generation consumes the root HTML/CSS unchanged
+except for substituting the bootstrap script with component lifecycle mounting.
+The C# window composes a noninteractive GPU control beneath the full-window WebScene
+host; the original DOM canvas and SVG overlays own all interaction coordinates.
+No separate native UI or input-command implementation is maintained.

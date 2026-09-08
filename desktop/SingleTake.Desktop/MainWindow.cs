@@ -2,7 +2,6 @@ using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using SingleTake.Desktop.Rendering;
@@ -12,116 +11,189 @@ using WebScene.Sdk;
 using WebScene.Sdk.Avalonia;
 
 namespace SingleTake.Desktop;
+
+/// <summary>The full WebScene UI is the web application. Only GPU pixels are composited underneath its DOM canvas.</summary>
 public sealed class MainWindow : Window
 {
-    readonly WebSceneComponentHost component;
-    readonly NativeViewport viewport=new();
-    readonly OverlayCanvas overlay=new();
-    readonly TextBlock status=new(){Text="Starting native engine…",Margin=new Thickness(12,5)};
-    readonly TextBlock gpuStatus=new(){Margin=new Thickness(12,5)};
-    readonly TextBlock errorText=new(){TextWrapping=TextWrapping.Wrap,Foreground=Brushes.OrangeRed,Margin=new Thickness(22),IsVisible=false};
-    readonly SceneStore store=new();
-    readonly InputQueue input=new();
-    readonly CancellationTokenSource lifetime=new();
-    readonly bool smoke=Environment.GetCommandLineArgs().Contains("--native-smoke");
-    bool mounted,sending,closing,allowClose,smokeCompleted;
-    long smokeSerial;
-    DispatcherTimer? smokeTimeout;
+    private readonly WebSceneComponentHost component;
+    private readonly NativeViewport viewport = new() { IsHitTestVisible = false, Focusable = false };
+    private readonly Canvas nativeLayer = new() { IsHitTestVisible = false, ClipToBounds = true };
+    private readonly TextBlock error = new() { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Black, Margin = new Thickness(24) };
+    private readonly Border errorPanel;
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim frameGate = new(1, 1);
+    private TaskCompletionSource<bool> applicationReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private SceneStore store = new();
+    private readonly bool smoke = Environment.GetCommandLineArgs().Contains("--native-smoke");
+    private bool mounted, closing, allowClose, smokeCompleted, sharedReady;
+    private long smokeSerial;
+    private DispatcherTimer? smokeTimeout;
 
     public MainWindow()
     {
-        Title="SingleTake · Native desktop preview";Width=1450;Height=940;MinWidth=900;MinHeight=600;
-        component=new WebSceneComponentHost{PackagePath=Path.Combine("Components","Modeler"),AutoMount=false};
-        component.RegisterHostCapability(new WebSceneDelegateCapabilityHandler(WebSceneComponentCapabilities.Commands,HandleCommandAsync));
-        var root=new Grid{ColumnDefinitions=new ColumnDefinitions("370,*"),RowDefinitions=new RowDefinitions("*,Auto")};
-        root.Children.Add(component);Grid.SetColumn(component,0);
-        var surface=new Grid();surface.Children.Add(viewport);surface.Children.Add(overlay);surface.Children.Add(errorText);root.Children.Add(surface);Grid.SetColumn(surface,1);
-        var footer=new StackPanel{Orientation=Orientation.Horizontal};footer.Children.Add(status);footer.Children.Add(gpuStatus);root.Children.Add(footer);Grid.SetRow(footer,1);Grid.SetColumnSpan(footer,2);Content=root;
-        viewport.CaptureAcceptancePixels=smoke;
-        viewport.Input+=Queue;viewport.Failed+=Report;
-        viewport.Presented+=e=>{gpuStatus.Text=e.Diagnostics;if(smoke&&smokeSerial>0&&e.Serial==smokeSerial&&e.Placements>0&&e.DrawCalls>0&&e.ChangedPixels>0)CompleteSmoke(0,e.Diagnostics+"; native non-background center pixels: "+e.ChangedPixels);};
-        Opened+=async(_,_)=>await StartAsync();Closing+=OnClosing;Closed+=async(_,_)=>{lifetime.Cancel();smokeTimeout?.Stop();try{await component.DisposeAsync();}catch(Exception ex){System.Diagnostics.Trace.WriteLine(ex);}lifetime.Dispose();};
+        Title = "SingleTake"; Width = 1450; Height = 940; MinWidth = 1000; MinHeight = 650;
+        Background = Brushes.Transparent;
+        component = new WebSceneComponentHost {
+            PackagePath = Path.Combine("Components", "Modeler"), AutoMount = false
+        };
+        component.View.Background = Brushes.Transparent;
+        component.RegisterHostCapability(new WebSceneDelegateCapabilityHandler(
+            WebSceneComponentCapabilities.Commands, HandleCommandAsync));
+
+        // No sidebar, status strip, duplicate toolbar or second input surface in C#.
+        nativeLayer.Children.Add(viewport);
+        var root = new Grid { ClipToBounds = true };
+        root.Children.Add(nativeLayer);
+        root.Children.Add(component);
+        errorPanel = new Border { Background = Brushes.White, Child = error, IsVisible = false };
+        root.Children.Add(errorPanel);
+        Content = root;
+        component.View.JavaScriptException += e => Report("JavaScript: " + e.Message + "\n" + e.Stack);
+        component.View.RuntimeFailed += e => Report("Native runtime: " + e.Message + "\n" + e.Stack);
+
+        viewport.CaptureAcceptancePixels = smoke;
+        viewport.Failed += Report;
+        viewport.Reset += async () => await NotifyAsync("globalThis.SingleTakeDesktop?.reset()");
+        viewport.Presented += async evidence => {
+            var json = JsonSerializer.Serialize(new {
+                serial = evidence.Serial, placements = evidence.Placements, draws = evidence.DrawCalls,
+                triangles = evidence.Triangles, cpuMs = evidence.CpuMs
+            }, SceneStore.JsonOptions);
+            await NotifyAsync("globalThis.SingleTakeDesktop?.presented(" + json + ")");
+            if (smoke && sharedReady && smokeSerial > 0 && evidence.Serial >= smokeSerial &&
+                evidence.Placements > 0 && evidence.DrawCalls > 0 && evidence.ChangedPixels > 0)
+                CompleteSmoke(0, evidence.Diagnostics + "; shared dialog submitted; native framebuffer verified");
+        };
+        Deactivated += async (_, _) => await NotifyAsync("globalThis.SingleTakeDesktop?.blurred()");
+        Opened += async (_, _) => await StartAsync();
+        Closing += OnClosing;
+        Closed += async (_, _) => {
+            mounted = false; lifetime.Cancel(); smokeTimeout?.Stop();
+            try { await component.DisposeAsync(); }
+            catch (Exception ex) { System.Diagnostics.Trace.WriteLine(ex); }
+            lifetime.Dispose();
+        };
     }
-    async Task StartAsync()
+
+    private async Task StartAsync()
     {
-        try
-        {
+        try {
             ValidateRuntimeFiles();
-            if(smoke){smokeTimeout=new DispatcherTimer{Interval=TimeSpan.FromSeconds(45)};smokeTimeout.Tick+=(_,_)=>CompleteSmoke(1,"Native smoke test timed out without a presented model.");smokeTimeout.Start();}
-            await component.MountAsync(lifetime.Token);mounted=true;
-            Queue(new NativeInput{Kind="resize",Width=Math.Max(1,viewport.Bounds.Width),Height=Math.Max(1,viewport.Bounds.Height)});
-            status.Text="Local files · native V8 / Avalonia / OpenGL";viewport.Focus();
-            if(smoke)await component.View.EvaluateTextAsync("globalThis.SingleTakeDesktop.startSmoke()");
-        }
-        catch(Exception ex){Report("Cannot start the native component. "+ex.Message+"\nCheck NuGet availability for the configured version and native runtime files. No browser fallback is used.");}
-    }
-    static void ValidateRuntimeFiles()
-    {
-        var library=OperatingSystem.IsWindows()?"webscene_native_engine.dll":OperatingSystem.IsMacOS()?"libwebscene_native_engine.dylib":"libwebscene_native_engine.so";
-        foreach(var name in new[]{library,"icudtl.dat","webscene_bootstrap_snapshot.bin","webscene_bootstrap_snapshot.meta","webscene-native-runtime.json","Components/Modeler/main.js","Components/Modeler/webscene-component.json"})
-            if(!File.Exists(Path.Combine(AppContext.BaseDirectory,name)))throw new FileNotFoundException("Required packaged asset is missing: "+name);
-    }
-    async ValueTask<JsonElement?> HandleCommandAsync(string method,JsonElement arguments,CancellationToken ct)
-    {
-        lifetime.Token.ThrowIfCancellationRequested();ct.ThrowIfCancellationRequested();
-        object? result;
-        switch(method)
-        {
-            case "frame":
-                var snapshot=store.Accept(arguments);
-                await UiThread.Run(()=>{viewport.SetScene(snapshot);overlay.SetScene(snapshot.Frame);Title=snapshot.Frame.Name+" · SingleTake";if(snapshot.Frame.Name=="Native acceptance"&&snapshot.Frame.Nodes.Length>0)smokeSerial=snapshot.Frame.Serial;return Task.FromResult(true);});
-                result=new{accepted=snapshot.Frame.Serial};break;
-            case "open":result=await NativeFiles.OpenAsync(this,ct);break;
-            case "save":result=await NativeFiles.SaveAsync(this,arguments.GetProperty("name").GetString()??"model.take",arguments.GetProperty("data").GetString()??"",ct);break;
-            case "inflate":result=new{data=await NativeFiles.InflateAsync(arguments.GetProperty("data").GetString()??"",arguments.GetProperty("expected").GetInt32(),ct)};break;
-            case "confirmDiscard":result=new{discard=await NativeFiles.ConfirmDiscardAsync(this)};break;
-            case "focusViewport":Dispatcher.UIThread.Post(()=>viewport.Focus());result=new{accepted=true};break;
-            case "focusPanel":Dispatcher.UIThread.Post(()=>component.Focus());result=new{accepted=true};break;
-            case "status":
-                var text=arguments.GetProperty("text").GetString()??"";if(text.Length>400)text=text[..400];Dispatcher.UIThread.Post(()=>status.Text=text);result=new{accepted=true};break;
-            case "ready":result=new{native=true,schema=1};break;
-            default:throw new InvalidOperationException("Host capability method is not allowed: "+method);
-        }
-        return JsonSerializer.SerializeToElement(result,SceneStore.JsonOptions);
-    }
-    void Queue(NativeInput item)
-    {
-        if(closing)return;
-        try{input.Add(item);}catch(InvalidOperationException){input.Clear();input.Add(new NativeInput{Kind="blur"});status.Text="Input queue was reset; repeat the interrupted gesture.";}
-        if(mounted&&!sending)Dispatcher.UIThread.Post(async()=>await PumpAsync(),DispatcherPriority.Input);
-    }
-    async Task PumpAsync()
-    {
-        if(sending||!mounted||closing)return;sending=true;
-        try
-        {
-            while(input.Count>0&&!closing)
-            {
-                var batch=input.Drain();var json=JsonSerializer.Serialize(batch,SceneStore.JsonOptions);
-                // Only serializer-produced literals cross evaluation. The called dispatcher queues JS work in order.
-                await component.View.EvaluateTextAsync("globalThis.SingleTakeDesktop.enqueue("+json+")");
+            if (smoke) {
+                smokeTimeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+                smokeTimeout.Tick += (_, _) => CompleteSmoke(1, "Shared native UI acceptance timed out.");
+                smokeTimeout.Start();
             }
+            await component.MountAsync(lifetime.Token);
+            mounted = true;
+            await applicationReady.Task.WaitAsync(TimeSpan.FromSeconds(30), lifetime.Token);
+            if (component.View.Content is Control inputSurface) inputSurface.Focus();
+            if (smoke) await component.View.EvaluateTextAsync("globalThis.SingleTakeDesktop.startSmoke()");
         }
-        catch(Exception ex){input.Clear();Report("Native input delivery failed: "+ex.Message);}
-        finally{sending=false;}
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (TimeoutException) { Report("The shared application did not report ready within 30 seconds."); }
+        catch (Exception ex) { Report("Native startup failed: " + ex.Message); }
     }
-    async void OnClosing(object? sender,WindowClosingEventArgs e)
+
+    private static void ValidateRuntimeFiles()
     {
-        if(allowClose)return;e.Cancel=true;if(closing)return;closing=true;
-        try
-        {
-            var dirty=mounted?await component.View.EvaluateTextAsync("String(!!globalThis.SingleTakeDesktop?.isDirty())"):"false";
-            if(dirty.Trim('"',' ','\r','\n')=="true"&&!await NativeFiles.ConfirmDiscardAsync(this))return;
-            allowClose=true;Close();
+        var library = OperatingSystem.IsWindows() ? "webscene_native_engine.dll" :
+            OperatingSystem.IsMacOS() ? "libwebscene_native_engine.dylib" : "libwebscene_native_engine.so";
+        foreach (var name in new[] { library, "icudtl.dat", "webscene_bootstrap_snapshot.bin",
+            "webscene_bootstrap_snapshot.meta", "webscene-native-runtime.json", "Components/Modeler/main.js",
+            "Components/Modeler/webscene-component.json", "Components/Modeler/ui/index.html",
+            "Components/Modeler/ui/style.css", "Components/Modeler/ui-source.json" })
+            if (!File.Exists(Path.Combine(AppContext.BaseDirectory, name)))
+                throw new FileNotFoundException("Required packaged asset is missing: " + name);
+    }
+
+    private async ValueTask<JsonElement?> HandleCommandAsync(string method, JsonElement args, CancellationToken ct)
+    {
+        lifetime.Token.ThrowIfCancellationRequested(); ct.ThrowIfCancellationRequested();
+        object? result;
+        switch (method) {
+            case "frame":
+                await frameGate.WaitAsync(ct);
+                try {
+                    var snapshot = store.Accept(args);
+                    var r = snapshot.Frame.Viewport ?? throw new InvalidDataException("The DOM canvas rectangle is required.");
+                    await UiThread.Run(() => {
+                        Canvas.SetLeft(viewport, r.Left); Canvas.SetTop(viewport, r.Top);
+                        viewport.Width = r.Width; viewport.Height = r.Height;
+                        viewport.SetScene(snapshot);
+                        Title = snapshot.Frame.Name + " · SingleTake";
+                        if (snapshot.Frame.Name == "Native acceptance" && snapshot.Frame.Nodes.Length > 0)
+                            smokeSerial = snapshot.Frame.Serial;
+                        return Task.FromResult(true);
+                    });
+                    result = new { accepted = snapshot.Frame.Serial };
+                } finally { frameGate.Release(); }
+                break;
+            case "open":
+                result = await NativeFiles.OpenAsync(this, ct, args.TryGetProperty("kind", out var kind) ? kind.GetString() ?? "model" : "model");
+                break;
+            case "save":
+                result = await NativeFiles.SaveAsync(this, args.GetProperty("name").GetString() ?? "model.take",
+                    args.GetProperty("data").GetString() ?? "", ct); break;
+            case "inflate":
+                result = new { data = await NativeFiles.InflateAsync(args.GetProperty("data").GetString() ?? "",
+                    args.GetProperty("expected").GetInt32(), ct) }; break;
+            case "recovery.load": result = new { data = await NativeRecovery.LoadAsync(ct) }; break;
+            case "recovery.save":
+                await NativeRecovery.SaveAsync(args.GetProperty("data").GetString() ?? "", ct);
+                result = new { saved = true }; break;
+            case "recovery.clear": await NativeRecovery.ClearAsync(ct); result = new { cleared = true }; break;
+            case "screenshot":
+                var png = await UiThread.Run(() => viewport.RequestScreenshotAsync().WaitAsync(TimeSpan.FromSeconds(15), ct));
+                result = new { data = Convert.ToBase64String(png) }; break;
+            case "reload":
+                // Return the bridge reply before unmounting the caller's engine context.
+                Dispatcher.UIThread.Post(async () => {
+                    try { mounted = false; sharedReady = false; applicationReady = new(TaskCreationOptions.RunContinuationsAsynchronously); store = new SceneStore(); await component.ReloadAsync(lifetime.Token); mounted = true; await applicationReady.Task.WaitAsync(TimeSpan.FromSeconds(30), lifetime.Token); errorPanel.IsVisible = false; }
+                    catch (Exception ex) { Report("Reload failed: " + ex.Message); }
+                }, DispatcherPriority.Background);
+                result = new { requested = true }; break;
+            case "ready":
+                if (args.GetProperty("ui").GetString() != "shared") throw new InvalidDataException("A separate desktop UI is not supported.");
+                sharedReady = true; applicationReady.TrySetResult(true); result = new { native = true, ui = "shared", schema = 1 }; break;
+            default: throw new InvalidOperationException("Host method is not allowed: " + method);
         }
-        catch(Exception ex){status.Text="Could not verify unsaved state: "+ex.Message;if(await NativeFiles.ConfirmDiscardAsync(this)){allowClose=true;Close();}}
-        finally{closing=false;}
+        return JsonSerializer.SerializeToElement(result, SceneStore.JsonOptions);
     }
-    void Report(string message){errorText.Text=message;errorText.IsVisible=true;status.Text="Native host error";System.Diagnostics.Trace.WriteLine(message);if(smoke)CompleteSmoke(1,message);}
-    void CompleteSmoke(int code,string message)
+
+    private async Task NotifyAsync(string expression)
     {
-        if(smokeCompleted)return;smokeCompleted=true;
-        smokeTimeout?.Stop();smokeTimeout=null;Console.WriteLine(JsonSerializer.Serialize(new{nativeSmoke=code==0?"PASS":"FAIL",message,geometry=store.Current?.Frame.Nodes.Length??0,renderer="native-opengl",browser=false}));allowClose=true;
-        if(Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)desktop.Shutdown(code);
+        if (!mounted || closing || lifetime.IsCancellationRequested) return;
+        try { await component.View.EvaluateTextAsync(expression); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine("Native UI notification: " + ex.Message); }
+    }
+
+    private async void OnClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (allowClose) return;
+        e.Cancel = true; if (closing) return; closing = true;
+        try {
+            var dirty = mounted ? await component.View.EvaluateTextAsync("String(!!globalThis.SingleTakeDesktop?.isDirty())") : "false";
+            if (dirty.Trim('"', ' ', '\r', '\n') == "true" && !await NativeFiles.ConfirmDiscardAsync(this)) return;
+            allowClose = true; Close();
+        }
+        catch { if (await NativeFiles.ConfirmDiscardAsync(this)) { allowClose = true; Close(); } }
+        finally { closing = false; }
+    }
+
+    private void Report(string message)
+    {
+        if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => Report(message)); return; }
+        Console.Error.WriteLine(message);
+        error.Text = message; errorPanel.IsVisible = true; System.Diagnostics.Trace.WriteLine(message);
+        if (smoke) CompleteSmoke(1, message);
+    }
+    private void CompleteSmoke(int code, string message)
+    {
+        if (smokeCompleted) return; smokeCompleted = true; smokeTimeout?.Stop();
+        Console.WriteLine(JsonSerializer.Serialize(new { nativeSmoke = code == 0 ? "PASS" : "FAIL", ui = "shared",
+            message, geometry = store.Current?.Frame.Nodes.Length ?? 0, renderer = "native-opengl", browser = false }));
+        allowClose = true;
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown(code);
     }
 }
